@@ -38,6 +38,33 @@
   .small { font-size:12px; color:var(--dim); }
   .notes { color:#e8c36a; font-size:12px; margin-top:6px; }
   .hint { font-size:12px; color:var(--dim); margin-top:8px; }
+
+  .speed-pill { padding:4px 10px; border-radius:6px; border:1px solid var(--line);
+    background:#1b2230; color:var(--text); cursor:pointer; font:13px ui-monospace, monospace; white-space:nowrap; }
+  .speed-pill.active { background:var(--acc); color:#06101f; border-color:var(--acc); }
+  .timeline { margin-top:8px; }
+  #slider { width:100%; accent-color:var(--acc); }
+  .time-labels { display:flex; justify-content:space-between; font-size:11px; color:var(--dim); margin-top:4px; }
+
+  .ctrl-panel { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin:8px 0 4px 0; }
+  .ctrl-btn, .controls select { font-size:12px; padding:6px 10px; border-radius:6px; border:1px solid var(--line);
+    background:#1b2230; color:var(--text); cursor:pointer; white-space:nowrap; width:auto; }
+  .ctrl-btn.primary { background:var(--acc); color:#06101f; border-color:var(--acc); font-weight:600; width:auto; margin-top:0; }
+  .ctrl-btn.active { background:var(--acc); color:#06101f; border-color:var(--acc); box-shadow:inset 0 2px 4px rgba(6,16,31,.25); }
+  .ctrl-btn:disabled { opacity:.5; cursor:default; }
+
+  .timeline { margin-top:8px; }
+  .slider-wrap { position:relative; height:34px; }
+  #slider { position:relative; z-index:2; width:100%; accent-color:var(--acc); margin:0; appearance:none; background:none; }
+  #slider::-webkit-slider-runnable-track { height:6px; border-radius:3px; background:rgba(106,169,255,.15); cursor:pointer; }
+  #slider::-webkit-slider-thumb { width:14px; height:14px; border-radius:50%; background:var(--acc); border:none; cursor:pointer; margin-top:-4px; }
+  #slider::-moz-range-track { height:6px; border-radius:3px; background:rgba(106,169,255,.15); cursor:pointer; }
+  #slider::-moz-range-thumb { width:14px; height:14px; border-radius:50%; background:var(--acc); border:none; cursor:pointer; }
+  #selection-overlay { position:absolute; left:0; top:14px; height:6px; border-radius:3px; background:rgba(106,169,255,.45); display:none; pointer-events:none; z-index:1; transition:left .2s,width .2s; }
+  .ticks { position:relative; height:12px; margin-top:4px; display:flex; align-items:flex-end; justify-content:space-between; }
+  .tick { width:1px; height:6px; background:var(--dim); position:absolute; bottom:0; pointer-events:none; }
+  .tick.active { background:var(--acc); height:10px; bottom:-2px; }
+  .time-labels { display:flex; justify-content:space-between; font-size:11px; color:var(--dim); margin-top:4px; }
 </style>
 </head>
 <body>
@@ -78,12 +105,18 @@
       <div id="hud" hidden></div>
     </div>
     <div class="controls">
-      <button id="play" disabled>▶</button>
-      <input id="slider" type="range" min="0" max="0" value="0" disabled>
-      <select id="fps" title="Швидкість">
-        <option value="2">2 к/с</option><option value="4" selected>4 к/с</option>
-        <option value="8">8 к/с</option><option value="12">12 к/с</option>
-      </select>
+      <button id="play" disabled class="ctrl-btn">▶</button>
+      <button id="btn-speed" class="ctrl-btn speed-pill" title="Швидкість">1×</button>
+      <button id="btn-cut" class="ctrl-btn" title="Режим обрізки">Cut</button>
+      <button id="btn-download" class="ctrl-btn primary" title="Завантажити вибрані кадри">TEST</button>
+    </div>
+    <div class="timeline">
+      <div class="slider-wrap">
+        <div id="selection-overlay"></div>
+        <input type="range" id="slider" min="0" max="0" value="0" disabled>
+      </div>
+      <div class="ticks" id="ticks"></div>
+      <div class="time-labels" id="time-labels"></div>
     </div>
     <div class="small" id="info"></div>
   </section>
@@ -98,7 +131,7 @@ const PRESETS = [
   ["RW Aur", "RW Aur", 0.05],
   ["R Dra", "R Dra", 0.05],
 ];
-let job = null, frames = [], timer = null, cur = 0, images = {raw: [], diff: []}, mode = "raw", poll = null;
+let job = null, frames = [], timer = null, cur = 0, images = {raw: [], diff: []}, mode = "raw", poll = null, speedMult = 1.0, selStart = null, selEnd = null, cutMode = false;
 
 // --- ініціалізація ---------------------------------------------------------
 fetch("/api/detectors").then(r => r.json()).then(list => {
@@ -160,13 +193,85 @@ function setBar(f) { $("bar").firstElementChild.style.width = Math.round(f * 100
 function setMsg(t, err) { const m = $("msg"); m.textContent = t; m.className = err ? "error" : ""; m.hidden = !t; }
 function fail(t) { $("go").disabled = false; $("bar").style.display = "none"; $("status").textContent = ""; setMsg(t, true); }
 
+$("btn-speed").onclick = () => {
+  if (speedMult === 1) speedMult = 2;
+  else if (speedMult === 2) speedMult = 4;
+  else if (speedMult === 4) speedMult = 0.5;
+  else speedMult = 1;
+  $("btn-speed").textContent = speedMult + "×";
+  if (timer) play();
+};
+
+function renderTimeline() {
+  const box = $("time-labels"); box.innerHTML = "";
+  if (!frames.length) return;
+  const a = frames[0], b = frames[frames.length - 1];
+  box.innerHTML = `<span>${a.utc || "MJD " + a.time.toFixed(1)}</span>` +
+    `<span style="margin-left:auto">${b.utc || "MJD " + b.time.toFixed(1)}</span>`;
+}
+function renderSelection() {
+  const ov = $("selection-overlay");
+  if (!frames.length || selStart === null || selEnd === null || selEnd < selStart) { ov.style.display = "none"; return; }
+  const n = frames.length - 1 || 1;
+  ov.style.display = "block";
+  ov.style.left = (selStart / n * 100) + "%";
+  ov.style.width = ((selEnd - selStart) / n * 100) + "%";
+}
+
+function renderTicks() {
+  const box = $("ticks"); box.innerHTML = "";
+  if (!frames.length) return;
+  const n = frames.length - 1 || 1;
+  frames.forEach((_, i) => {
+    const t = document.createElement("div");
+    t.className = "tick" + (i === cur ? " active" : "");
+    t.style.left = (i / n * 100) + "%";
+    box.appendChild(t);
+  });
+}
+
+function updateActiveTick(i) {
+  $("ticks").querySelectorAll(".tick").forEach((t, idx) => {
+    t.className = "tick" + (idx === i ? " active" : "");
+  });
+}
+
+$("btn-cut").onclick = () => {
+  if (!frames.length) return;
+  cutMode = !cutMode;
+  $("btn-cut").classList.toggle("active", cutMode);
+  if (cutMode) { selStart = cur; selEnd = cur; renderSelection(); }
+  else { selStart = null; selEnd = null; renderSelection(); }
+};
+
+$("btn-download").onclick = async () => {
+  if (!frames.length || selStart === null || selEnd === null) return;
+  const btn = $("btn-download"); btn.disabled = true; btn.textContent = "Завантаження…";
+  try {
+    for (let i = selStart; i <= selEnd; i++) {
+      const blob = await (await fetch(url(i, mode))).blob();
+      const f = frames[i];
+      const stamp = f.utc ? f.utc.replace(/[^0-9]/g, "") : "MJD" + f.time.toFixed(3).replace(".", "");
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `SPHEREx_${stamp}_${String(i).padStart(3,"0")}_${mode}.png`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(a.href);
+      await new Promise(r => setTimeout(r, 150));
+    }
+  } finally { btn.disabled = false; btn.textContent = "⬇ Вибране"; };
+};
+
 // --- відтворення -----------------------------------------------------------
 function ready(res) {
   $("go").disabled = false; $("bar").style.display = "none"; $("status").textContent = `Кадрів: ${res.count}`;
-  frames = res.frames; mode = document.querySelector('input[name=mode]:checked').value;
+  frames = res.frames;
+  selStart = null; selEnd = null; cutMode = false; $("btn-cut").classList.remove("active");
+  mode = document.querySelector('input[name=mode]:checked').value;
   const n = res.meta.notes || []; $("notes").textContent = n.join(" ");
   $("slider").max = frames.length - 1; $("slider").disabled = false; $("play").disabled = false;
   preload(mode); cur = 0; show(0); setMsg("");
+  renderTimeline(); renderTicks();
   $("info").textContent = `Ціль: ${res.meta.target}; центр ${res.meta.ra}, ${res.meta.dec} (епоха ${res.meta.epoch}); ` +
     `піксель SPHEREx ≈ ${res.meta.native_pixel_arcsec}″; пропущено без покриття: ${res.meta.skipped_no_coverage}.`;
   play();
@@ -181,15 +286,28 @@ function show(i) {
   const im = $("img"); im.hidden = false;
   im.src = images[mode][i] && images[mode][i].complete ? images[mode][i].src : url(i, mode);
   $("slider").value = i;
+  updateActiveTick(i);
+  if (cutMode) {
+    if (selStart === null) selStart = i;
+    if (selEnd === null) selEnd = i;
+    else if (i >= selStart && i > selEnd) selEnd = i;
+    renderSelection();
+  }
   const hud = $("hud"); hud.hidden = false;
   hud.textContent = `${i + 1}/${frames.length}  ${f.utc || "MJD " + f.time.toFixed(3)}  λ ≈ ${f.wavelength_um ?? "?"} мкм`;
 }
 function play() { stopPlay(); $("play").textContent = "⏸";
-  timer = setInterval(() => show((cur + 1) % frames.length), 1000 / parseInt($("fps").value)); }
+  const fps = 4 * speedMult;
+  timer = setInterval(() => show((cur + 1) % frames.length), 1000 / fps); }
 function stopPlay() { clearInterval(timer); timer = null; $("play").textContent = "▶"; }
 $("play").onclick = () => timer ? stopPlay() : play();
-$("slider").oninput = e => { stopPlay(); show(parseInt(e.target.value)); };
-$("fps").onchange = () => { if (timer) play(); };
+$("slider").oninput = e => {
+  stopPlay(); let i = parseInt(e.target.value);
+  if (cutMode && selStart !== null && i < selStart) i = selStart;
+  $("slider").value = i;
+  show(i);
+  if (cutMode && selStart !== null) { selEnd = i; renderSelection(); }
+};
 document.querySelectorAll('input[name=mode]').forEach(r => r.onchange = e => {
   mode = e.target.value; updateUrl();
   if (!frames.length) return; preload(mode); show(cur);
