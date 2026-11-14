@@ -1,0 +1,5 @@
+numpy==2.5.4
+matplotlib==3.11.2
+astropy==8.0.2
+astroquery==0.4.11
+firefly_client==3.4.0
