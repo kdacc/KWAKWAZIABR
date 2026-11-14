@@ -65,6 +65,12 @@
   .tick { width:1px; height:6px; background:var(--dim); position:absolute; bottom:0; pointer-events:none; }
   .tick.active { background:var(--acc); height:10px; bottom:-2px; }
   .time-labels { display:flex; justify-content:space-between; font-size:11px; color:var(--dim); margin-top:4px; }
+  
+  .coord-row { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
+  .coord-row label { flex-shrink:0; margin:0; width:30px; font-weight:bold; }
+  .coord-row input { flex:1; }
+  .coord-row select { width:auto; padding:4px 8px; font-size:12px; border:1px solid var(--line); background:#1b2230; cursor:pointer; }
+  .static-unit { font-size:12px; color:var(--dim); padding:4px 8px; flex-shrink:0; background:#141923; border:1px dashed var(--line); border-radius:6px; width:110px; text-align:center; }
 </style>
 </head>
 <body>
@@ -74,8 +80,27 @@
 </header>
 <main>
   <section class="panel">
-    <label for="target">Об'єкт або координати (RA, Dec)</label>
-    <input id="target" type="text" placeholder="напр. 08h55m10.831s -07d14m42.53s" value="08h55m10.831s -07d14m42.53s">
+    <label>Координати об'єкта</label>
+    
+    <!-- Поле RA -->
+    <div class="coord-row">
+      <label for="target-ra">RA</label>
+      <!-- Прибрано атрибут value -->
+      <input id="target-ra" type="text" placeholder="08h55m10.831s">
+      <select id="coord-format">
+        <option value="hours" selected>Години (hms)</option>
+        <option value="deg">Градуси (.)</option>
+      </select>
+    </div>
+
+    <!-- Поле Dec -->
+    <div class="coord-row">
+      <label for="target-dec">Dec</label>
+      <!-- Прибрано атрибут value -->
+      <input id="target-dec" type="text" placeholder="-07d14m42.53s">
+      <div id="dec-unit" class="static-unit">Градуси (dms)</div>
+    </div>
+
     <div class="presets" id="presets"></div>
 
     <label for="fov">Поле зору, градуси (0.01–0.3)</label>
@@ -132,6 +157,24 @@ const PRESETS = [
 ];
 let job = null, frames = [], timer = null, cur = 0, images = {raw: [], diff: []}, mode = "raw", poll = null, speedMult = 1.0, selStart = null, selEnd = null, cutMode = false;
 
+// --- керування плейсхолдерами для форматів вводу ---------------------------
+$("coord-format").addEventListener("change", (e) => {
+  const v = e.target.value;
+  const ra = $("target-ra");
+  const dec = $("target-dec");
+  const decUnit = $("dec-unit");
+  
+  if (v === "deg") {
+    ra.placeholder = "133.795";
+    dec.placeholder = "-7.245";
+    decUnit.textContent = "Градуси (.)";
+  } else {
+    ra.placeholder = "08h55m10.831s";
+    dec.placeholder = "-07d14m42.53s";
+    decUnit.textContent = "Градуси (dms)";
+  }
+});
+
 // --- ініціалізація ---------------------------------------------------------
 fetch("/api/detectors").then(r => r.json()).then(list => {
   $("det").innerHTML = list.map(d =>
@@ -141,20 +184,51 @@ fetch("/api/detectors").then(r => r.json()).then(list => {
 $("presets").innerHTML = PRESETS.map((p, i) => `<button data-i="${i}">${p[0]}</button>`).join("");
 $("presets").addEventListener("click", e => {
   const b = e.target.closest("button"); if (!b) return;
-  const p = PRESETS[b.dataset.i]; $("target").value = p[1]; $("fov").value = p[2];
+  const p = PRESETS[b.dataset.i];
+  
+  const parts = p[1].split(/\s+(?=[+-])/);
+  if (parts.length === 2) {
+    $("target-ra").value = parts[0].trim();
+    $("target-dec").value = parts[1].trim();
+  } else {
+    $("target-ra").value = p[1];
+    $("target-dec").value = "";
+  }
+  $("fov").value = p[2];
 });
+
+function getTargetValue() {
+  return `${$("target-ra").value} ${$("target-dec").value}`.trim();
+}
 
 function applyUrl() {
   const q = new URLSearchParams(location.search);
-  const t = q.get("target") || (q.get("ra") && q.get("dec") ? `${q.get("ra")}, ${q.get("dec")}` : null);
-  if (t) $("target").value = t;
+  const t = q.get("target");
+  
+  if (t) {
+    const parts = t.split(/\s+(?=[+-])/);
+    if (parts.length === 2) {
+      $("target-ra").value = parts[0].trim();
+      $("target-dec").value = parts[1].trim();
+    } else {
+      $("target-ra").value = t;
+    }
+  } else if (q.get("ra") && q.get("dec")) {
+    $("target-ra").value = q.get("ra");
+    $("target-dec").value = q.get("dec");
+  }
+  
   if (q.get("fov")) $("fov").value = q.get("fov");
   if (q.get("det")) $("det").value = q.get("det");
-  if (q.get("mode") === "diff") document.querySelector('input[value=diff]').checked = true;
-  if (t) start();
+  
+  const diffRadio = document.querySelector('input[value=diff]');
+  if (q.get("mode") === "diff" && diffRadio) diffRadio.checked = true;
+  
+  if (t || (q.get("ra") && q.get("dec"))) start();
 }
+
 function updateUrl() {
-  const q = new URLSearchParams({target: $("target").value, fov: $("fov").value, det: $("det").value,
+  const q = new URLSearchParams({target: getTargetValue(), fov: $("fov").value, det: $("det").value,
     mode: document.querySelector('input[name=mode]:checked').value});
   history.replaceState(null, "", "?" + q.toString());
 }
@@ -170,7 +244,7 @@ async function start() {
   updateUrl();
   try {
     const r = await fetch("/api/jobs", {method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({target: $("target").value, fov: parseFloat($("fov").value), detector: parseInt($("det").value)})});
+      body: JSON.stringify({target: getTargetValue(), fov: parseFloat($("fov").value), detector: parseInt($("det").value)})});
     const body = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(body.detail ? JSON.stringify(body.detail) : r.statusText);
     job = body.job_id;
