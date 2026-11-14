@@ -87,7 +87,6 @@ These objects provide examples of phenomena such as proper motion and brightness
 **Astronomical data services:**
 - NASA SPHEREx
 - IRSA (Infrared Processing and Analysis Center)
-- SIMBAD
 
 ## Project Scope
 

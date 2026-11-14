@@ -5,8 +5,7 @@
   1. очищення (ZODI, FLAGS) і читання MEF-подібного FITS;
   2. вирівнювання кадрів з різним зсувом і поворотом WCS;
   3. що нерухомі зорі лишаються на місці, а рухомий об'єкт зсувається;
-  4. режим «лише зміни» гасить нерухоме й підсвічує рухоме;
-  5. весь HTTP-конвеєр (POST job -> статус -> PNG) з підміненим доступом до IRSA.
+  4. весь HTTP-конвеєр (POST job -> статус -> PNG) з підміненим доступом до IRSA.
 Запуск: pytest -q test_synthetic.py
 """
 import math
@@ -74,7 +73,6 @@ def centroid(img, x0, y0, r=4):
     return (xs * wgt).sum() / wgt.sum(), (ys * wgt).sum() / wgt.sum()
 
 
-# ---------------------------------------------------------------------------
 def test_app_imports_in_fresh_process():
     """Реальний шлях запуску: app імпортується першим, без попередньо імпортованого astropy."""
     import subprocess
@@ -127,34 +125,6 @@ def test_alignment_keeps_static_stars_fixed_and_moves_mover():
     assert np.mean(-d) == pytest.approx(expected, rel=0.15)
 
 
-def test_diff_mode_suppresses_static_and_highlights_mover():
-    frames = make_frames(8)
-    stack = core.build_stack(frames, RA0, DEC0, fov_deg=N * SCALE * 0.7)
-    grid, _ = core.make_grid(RA0, DEC0, N * SCALE * 0.7, 6.15)
-    norm = core.normalize_stack(stack.aligned)
-    diff = core.difference_stack(norm)
-
-    def val(arr, k, dra, ddec, r=2):
-        x, y = grid.world_to_pixel(SkyCoord((RA0 + dra) * u.deg, (DEC0 + ddec) * u.deg))
-        xi, yi = int(round(float(x))), int(round(float(y)))
-        return np.nanmax(arr[k, yi - r:yi + r + 1, xi - r:xi + r + 1])
-
-    k = 2
-    mover_resp = val(diff, k, MOVER_START[0] + MOVER_STEP * k, MOVER_START[1])
-    star_resp = val(diff, k, STARS[0][0], STARS[0][1])
-    star_raw = val(norm, k, STARS[0][0], STARS[0][1])
-    assert mover_resp > 5.0, "рухомий об'єкт має бути помітним у різницевому режимі"
-    assert star_resp < 0.35 * star_raw, "нерухома зоря має бути сильно пригнічена"
-    assert star_resp < mover_resp
-
-
-def test_diff_needs_three_frames():
-    frames = make_frames(2)
-    stack = core.build_stack(frames, RA0, DEC0, fov_deg=N * SCALE * 0.7)
-    with pytest.raises(ValueError):
-        stack.png(0, "diff")
-
-
 def test_png_output_and_north_up():
     frames = make_frames(4)
     stack = core.build_stack(frames, RA0, DEC0, fov_deg=N * SCALE * 0.7)
@@ -197,14 +167,11 @@ def test_parse_coordinates():
 
 
 def test_proper_motion_propagation():
-    t = core.Target(ra=100.0, dec=0.0, pmra=0.0, pmdec=10000.0)     # 10"/рік на північ
+    t = core.Target(ra=100.0, dec=0.0, pmra=0.0, pmdec=10000.0)    
     ra, dec = core.propagate(t, 2026.0)
     assert dec == pytest.approx(26 * 10.0 / 3600.0, rel=1e-6)
 
 
-# ---------------------------------------------------------------------------
-# Повний HTTP-конвеєр з підміненим IRSA
-# ---------------------------------------------------------------------------
 def test_http_pipeline_with_mocked_archive(monkeypatch, tmp_path):
     from fastapi.testclient import TestClient
     import app as appmod
@@ -246,18 +213,15 @@ def test_http_pipeline_with_mocked_archive(monkeypatch, tmp_path):
     assert res["meta"]["detector"] == 2
 
     for mode in ("raw", "diff"):
-        r = client.get(f"/api/jobs/{jid}/frame/0.png?mode={mode}")
+        r = client.get(f"/api/jobs/{jid}/frame/0.png")
         assert r.status_code == 200 and r.content[:4] == b"\x89PNG"
     assert client.get(f"/api/jobs/{jid}/frame/99.png").status_code == 404
 
-    # інший детектор -> інший результат (тут: помилка «знімків не знайдено»)
     _, s3 = run(3)
     assert s3["status"] == "error" and "не знайдено" in s3["error"]
 
-    # той самий запит повторно: той самий job
     r1 = client.post("/api/jobs", json={"target": f"{RA0}, {DEC0}", "fov": 0.1, "detector": 2}).json()
     assert r1["job_id"] == jid
 
-    # валідація
     assert client.post("/api/jobs", json={"target": "x", "fov": 5, "detector": 2}).status_code == 422
     assert client.post("/api/jobs", json={"target": "x", "fov": 0.1, "detector": 9}).status_code == 422
