@@ -34,7 +34,7 @@ _astropy_log.setLevel("ERROR")
 
 IRSA_BASE = "https://irsa.ipac.caltech.edu/"
 CACHE_DIR = os.environ.get("SPHEREX_CACHE", "cache")
-CACHE_TTL_S = 24 * 3600          # метадані оновлюються щотижня; доба -- безпечно
+CACHE_TTL_S = 168 * 3600          # метадані оновлюються щотижня; доба -- безпечно
 MAX_FRAMES = int(os.environ.get("SPHEREX_MAX_FRAMES", "300"))
 MAX_WORKERS = int(os.environ.get("SPHEREX_WORKERS", "10"))
 MAX_GRID = 300                    # максимум пікселів на сторону вихідної сітки
@@ -227,8 +227,7 @@ def load_cutout(url: str, coord, time_value: float, retries: int = 2) -> Optiona
     last_err: Optional[Exception] = None
     for attempt in range(retries + 1):
         try:
-            with fits.open(url, cache=False) as hdul:
-                # HDU: 1 IMAGE, 2 FLAGS, 3 VARIANCE, 4 ZODI, 5 EPSF/PSF, 6 WCS-WAVE
+            with fits.open(url, cache=True) as hdul:                # HDU: 1 IMAGE, 2 FLAGS, 3 VARIANCE, 4 ZODI, 5 EPSF/PSF, 6 WCS-WAVE
                 header = hdul[1].header
                 img, frac = clean_image(hdul[1].data, hdul[4].data, hdul[2].data)
                 if img is None:
