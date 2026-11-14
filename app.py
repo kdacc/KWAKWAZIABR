@@ -7,7 +7,7 @@
 API:
   POST /api/jobs                      {target, fov, detector} -> {job_id}
   GET  /api/jobs/{id}                 стан, прогрес, список кадрів (коли готово)
-  GET  /api/jobs/{id}/frame/{i}.png   ?mode=raw|diff
+  GET  /api/jobs/{id}/frame/{i}.png   ?mode=raw
   GET  /api/detectors                 довідка про 6 детекторів
 """
 from __future__ import annotations
@@ -97,12 +97,12 @@ def job_status(job_id: str):
 
 
 @app.get("/api/jobs/{job_id}/frame/{index}.png")
-def job_frame(job_id: str, index: int, mode: str = Query("raw", pattern="^(raw|diff)$")):
+def job_frame(job_id: str, index: int):
     job = JOBS.get(job_id)
     if not job or job["status"] != "done":
         raise HTTPException(404, "Кадри ще не готові")
     try:
-        png = job["stack"].png(index, mode)
+        png = job["stack"].png(index, "raw")
     except IndexError:
         raise HTTPException(404, "Немає такого кадру")
     except ValueError as e:

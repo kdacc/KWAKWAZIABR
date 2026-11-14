@@ -26,21 +26,21 @@ from typing import Callable, Optional
 
 import numpy as np
 
-# Важливо: спершу імпортуємо astropy, і лише потім чіпаємо його логер. Якщо створити
-# logging.getLogger("astropy") до імпорту, astropy не зможе ініціалізувати власний логер.
 from astropy import log as _astropy_log
 
 _astropy_log.setLevel("ERROR")
 
 IRSA_BASE = "https://irsa.ipac.caltech.edu/"
 CACHE_DIR = os.environ.get("SPHEREX_CACHE", "cache")
-CACHE_TTL_S = 168 * 3600          # метадані оновлюються щотижня; доба -- безпечно
+CACHE_TTL_S = 168 * 3600         
 MAX_FRAMES = int(os.environ.get("SPHEREX_MAX_FRAMES", "300"))
 MAX_WORKERS = int(os.environ.get("SPHEREX_WORKERS", "10"))
-MAX_GRID = 300                    # максимум пікселів на сторону вихідної сітки
-OVERSAMPLE = 2                    # вихідна сітка вдвічі дрібніша за піксель SPHEREx
-FLAG_MASK = 0xFFFFFFFF            # які біти FLAGS маскувати (див. Table 16 Explanatory Supplement)
-FLAG_FALLBACK_FRAC = 0.6          # якщо «позначено» понад 60% пікселів -- прапорці ігноруємо
+MAX_GRID = 300                   
+OVERSAMPLE = 2                    
+FLAG_MASK = 0xFFFFFFFF            
+FLAG_FALLBACK_FRAC = 0.6    
+MAX_FOV_DEG = 0.3          
+CUTOUT_SIZE = MAX_FOV_DEG * 1.5      
 
 # Діапазони довжин хвиль детекторів (з документації IRSA)
 DETECTOR_BANDS = {
@@ -55,14 +55,11 @@ def _noop(stage: str, done: int, total: int) -> None:
     pass
 
 
-# ---------------------------------------------------------------------------
-# Ціль: розбір координат / назви
-# ---------------------------------------------------------------------------
 @dataclass
 class Target:
-    ra: float                 # градуси, J2000 (ICRS)
+    ra: float                
     dec: float
-    pmra: float = 0.0         # мс дуги/рік (pm_ra * cos dec)
+    pmra: float = 0.0         
     pmdec: float = 0.0
     label: str = ""
     note: str = ""
@@ -78,12 +75,12 @@ def _parse_coords(text: str) -> Optional[tuple[float, float]]:
     if m:
         return float(m.group(1)), float(m.group(2))
     try:
-        c = SkyCoord(t, frame="icrs")                       # 08h55m10.8s -07d14m42s
+        c = SkyCoord(t, frame="icrs")                       
         return float(c.ra.deg), float(c.dec.deg)
     except Exception:
         pass
     try:
-        c = SkyCoord(t, unit=(u.hourangle, u.deg), frame="icrs")  # 08 55 10.8 -07 14 42
+        c = SkyCoord(t, unit=(u.hourangle, u.deg), frame="icrs")  
         return float(c.ra.deg), float(c.dec.deg)
     except Exception:
         return None
@@ -121,10 +118,10 @@ def resolve_name(name: str) -> Target:
             pmra = _to_float(tab[cols["pmra"]][0]) if "pmra" in cols else 0.0
             pmdec = _to_float(tab[cols["pmdec"]][0]) if "pmdec" in cols else 0.0
             return Target(ra, dec, pmra, pmdec, label=name)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  
         logging.warning("SIMBAD не спрацював для %r: %s", name, e)
 
-    c = SkyCoord.from_name(name)   # запасний варіант: без власного руху
+    c = SkyCoord.from_name(name)   
     return Target(float(c.ra.deg), float(c.dec.deg), 0.0, 0.0, label=name,
                   note="Власний рух не враховано (SIMBAD недоступний).")
 
@@ -150,9 +147,6 @@ def propagate(t: Target, year: float) -> tuple[float, float]:
     return ra % 360.0, max(-90.0, min(90.0, dec))
 
 
-# ---------------------------------------------------------------------------
-# Запит до IRSA TAP
-# ---------------------------------------------------------------------------
 def query_frames(ra: float, dec: float, detector: int) -> list[tuple[str, float]]:
     """
     Повертає [(base_uri, time), ...] відсортований за часом.
@@ -176,7 +170,6 @@ def query_frames(ra: float, dec: float, detector: int) -> list[tuple[str, float]
     rows = [(str(r["uri"]), float(r["t"])) for r in res]
     rows.sort(key=lambda r: r[1])
 
-    # Дублікати (напр. l2b_retry) того ж спостереження: лишаємо один, віддаємо перевагу не-retry
     best: dict[int, tuple[str, float]] = {}
     for uri, t in rows:
         key = int(round(t * 1e6))
@@ -189,16 +182,14 @@ def cutout_url(base_uri: str, ra: float, dec: float, size_deg: float) -> str:
     return f"{IRSA_BASE}{base_uri}?center={ra},{dec}d&size={size_deg}"
 
 
-# ---------------------------------------------------------------------------
-# Завантаження та очищення одного cutout
-# ---------------------------------------------------------------------------
+
 @dataclass
 class Frame:
     url: str
     time: float
     wavelength_um: float
-    image: np.ndarray          # очищене: ZODI віднято, погані пікселі NaN, фон = 0
-    wcs: object                # astropy WCS (просторовий)
+    image: np.ndarray          
+    wcs: object                
     flagged_frac: float = 0.0
 
 
@@ -208,7 +199,7 @@ def clean_image(image, zodi, flags) -> tuple[Optional[np.ndarray], float]:
     bad = ~np.isfinite(img)
     flagged = (np.asarray(flags).astype(np.int64) & FLAG_MASK) != 0
     frac = float(flagged.mean()) if flagged.size else 0.0
-    if frac < FLAG_FALLBACK_FRAC:      # інакше прапорці, схоже, позначають «норму» -- ігноруємо
+    if frac < FLAG_FALLBACK_FRAC:     
         bad |= flagged
     img[bad] = np.nan
     if not np.isfinite(img).any():
@@ -223,11 +214,11 @@ def load_cutout(url: str, coord, time_value: float, retries: int = 2) -> Optiona
     from astropy.utils.data import conf
     from astropy.wcs import WCS
 
-    conf.remote_timeout = 120      # читання SPHEREx може перевищувати стандартний ліміт
+    conf.remote_timeout = 120      
     last_err: Optional[Exception] = None
     for attempt in range(retries + 1):
         try:
-            with fits.open(url, cache=True) as hdul:                # HDU: 1 IMAGE, 2 FLAGS, 3 VARIANCE, 4 ZODI, 5 EPSF/PSF, 6 WCS-WAVE
+            with fits.open(url, cache=True) as hdul:                
                 header = hdul[1].header
                 img, frac = clean_image(hdul[1].data, hdul[4].data, hdul[2].data)
                 if img is None:
@@ -240,13 +231,13 @@ def load_cutout(url: str, coord, time_value: float, retries: int = 2) -> Optiona
                     swcs.sip = None
                     w, _bw = swcs.pixel_to_world(x, y)
                     wl = float(w.to("um").value)
-                except Exception:      # noqa: BLE001  (WCS-WAVE не завжди читається)
+                except Exception:      
                     pass
                 return Frame(url, float(time_value), wl, img, wcs, frac)
         except (OSError, TimeoutError, http.client.HTTPException) as e:
             last_err = e
             time.sleep(1.5 * (attempt + 1))
-        except (KeyError, IndexError, ValueError) as e:   # зіпсований/незвичний файл
+        except (KeyError, IndexError, ValueError) as e:   
             logging.warning("Пропущено %s: %s", url, e)
             return None
     logging.warning("Не вдалося завантажити %s: %s", url, last_err)
@@ -270,14 +261,11 @@ def fetch_frames(urls_times: list[tuple[str, float]], coord,
     return frames
 
 
-# ---------------------------------------------------------------------------
-# Вирівнювання на спільну сітку
-# ---------------------------------------------------------------------------
 def make_grid(ra: float, dec: float, fov_deg: float, native_scale_arcsec: float):
     """Небесна сітка TAN навколо (ra, dec) з північчю вгору і сходом ліворуч."""
     from astropy.wcs import WCS
 
-    scale = native_scale_arcsec / OVERSAMPLE                    # арксек/піксель
+    scale = native_scale_arcsec / OVERSAMPLE                    
     n = int(round(fov_deg * 3600.0 / scale))
     n = max(16, min(n, MAX_GRID))
     scale = fov_deg * 3600.0 / n
@@ -305,7 +293,7 @@ def align_frames(frames: list[Frame], grid_wcs, shape) -> tuple[np.ndarray, list
     for f in frames:
         arr, _fp = reproject_interp((f.image, f.wcs), grid_wcs, shape_out=shape, order="bilinear")
         arr = arr.astype(np.float32)
-        if np.isfinite(arr).mean() < 0.3:      # кадр майже не покриває сітку
+        if np.isfinite(arr).mean() < 0.3:      
             continue
         out.append(arr)
         kept.append(f)
@@ -314,9 +302,6 @@ def align_frames(frames: list[Frame], grid_wcs, shape) -> tuple[np.ndarray, list
     return np.stack(out), kept
 
 
-# ---------------------------------------------------------------------------
-# Нормування, різниця, рендер
-# ---------------------------------------------------------------------------
 def robust_sigma(a: np.ndarray) -> float:
     v = a[np.isfinite(a)]
     if v.size == 0:
@@ -331,32 +316,6 @@ def normalize_stack(stack: np.ndarray) -> np.ndarray:
     for i in range(stack.shape[0]):
         out[i] = stack[i] / robust_sigma(stack[i])
     return out
-
-
-def difference_stack(norm: np.ndarray) -> np.ndarray:
-    """
-    «Лише зміни»: від кожного кадру віднімаємо медіанний еталон нерухомого неба.
-    Яскравість еталона підганяємо до кадру масштабом g (статичні джерела мають різну
-    яскравість у різних довжинах хвиль). Результат у одиницях шуму.
-    """
-    if norm.shape[0] < 3:
-        raise ValueError("Для режиму «лише зміни» потрібно щонайменше 3 кадри.")
-    import warnings
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", RuntimeWarning)     # пікселі без покриття в усіх кадрах
-        ref = np.nanmedian(norm, axis=0)
-    bright = np.isfinite(ref) & (ref > 5.0)
-    diff = np.empty_like(norm)
-    for i in range(norm.shape[0]):
-        f = norm[i]
-        g = 1.0
-        m = bright & np.isfinite(f)
-        if m.sum() >= 3:
-            # медіана відношень стійкіша до рухомого об'єкта, ніж сума (він не завищує масштаб)
-            g = float(np.clip(np.median(f[m] / ref[m]), 0.2, 5.0))
-        d = f - g * ref
-        diff[i] = d / robust_sigma(d)
-    return diff
 
 
 def _asinh(x: np.ndarray, soft: float = 3.0) -> np.ndarray:
@@ -393,15 +352,13 @@ def gray_to_png(gray2d: np.ndarray, min_side: int = 512) -> bytes:
     return buf.getvalue()
 
 
-# ---------------------------------------------------------------------------
-# Результат конвеєра
-# ---------------------------------------------------------------------------
+
 def mjd_to_utc(t: float) -> str:
     try:
         if 40000 < t < 80000:
             from astropy.time import Time
             return Time(t, format="mjd").strftime("%Y-%m-%d %H:%M")
-    except Exception:  # noqa: BLE001
+    except Exception:  
         pass
     return ""
 
@@ -411,7 +368,7 @@ def mjd_to_jyear(t: float) -> Optional[float]:
         if 40000 < t < 80000:
             from astropy.time import Time
             return float(Time(t, format="mjd").jyear)
-    except Exception:  # noqa: BLE001
+    except Exception:  
         pass
     return None
 
@@ -437,8 +394,6 @@ class Stack:
             norm = normalize_stack(self.aligned)
             self._raw = to_gray_raw(norm)
             self._norm = norm
-        if mode == "diff" and self._diff is None:
-            self._diff = to_gray_diff(difference_stack(self._norm))
 
     def png(self, i: int, mode: str = "raw") -> bytes:
         if mode not in ("raw", "diff"):
@@ -479,9 +434,30 @@ def build_stack(frames: list[Frame], ra: float, dec: float, fov_deg: float,
                  [f.url for f in kept], m)
 
 
-# ---------------------------------------------------------------------------
-# Дисковий кеш (вирівняний стек)
-# ---------------------------------------------------------------------------
+RAW_CACHE_DIR = os.path.join(CACHE_DIR, "raw")
+
+def raw_cache_key(target_text: str, detector: int) -> str:
+    raw = f"{target_text.strip().lower()}|raw|{int(detector)}"
+    return hashlib.sha1(raw.encode()).hexdigest()[:16]
+
+
+def save_raw_frames(path: str, frames: list[Frame], meta: dict) -> None:
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+
+    payload = {
+        "times": np.array([f.time for f in frames]),
+        "wavelengths": np.array([f.wavelength_um for f in frames]),
+        "urls": np.array([f.url for f in frames]),
+        "flagged_frac": np.array([f.flagged_frac for f in frames]),
+        "meta": np.array(json.dumps(meta)),
+    }
+
+    images = [f.image for f in frames]
+    wcs_headers = [dict(f.wcs.to_header(relax=True)) for f in frames]
+    np.savez_compressed(path, **payload, images=np.array(images, dtype=object),
+                        wcs_headers=np.array(wcs_headers, dtype=object))
+
+
 def cache_key(target_text: str, fov: float, detector: int) -> str:
     raw = f"{target_text.strip().lower()}|{fov:.5f}|{int(detector)}"
     return hashlib.sha1(raw.encode()).hexdigest()[:16]
@@ -489,9 +465,14 @@ def cache_key(target_text: str, fov: float, detector: int) -> str:
 
 def save_stack(path: str, s: Stack) -> None:
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    np.savez_compressed(path, aligned=s.aligned, times=np.array(s.times),
-                        wavelengths=np.array(s.wavelengths), urls=np.array(s.urls),
-                        meta=np.array(json.dumps(s.meta)))
+    np.savez_compressed(
+        path,
+        aligned=s.aligned,
+        times=np.array(s.times),
+        wavelengths=np.array(s.wavelengths),
+        urls=np.array(s.urls),
+        meta=np.array(json.dumps(s.meta)),
+    )
 
 
 def load_stack(path: str) -> Optional[Stack]:
@@ -499,15 +480,37 @@ def load_stack(path: str) -> Optional[Stack]:
         return None
     try:
         z = np.load(path, allow_pickle=False)
-        return Stack(z["aligned"], z["times"], z["wavelengths"], z["urls"].tolist(),
-                     json.loads(str(z["meta"])))
+        return Stack(
+            z["aligned"], z["times"], z["wavelengths"],
+            z["urls"].tolist(), json.loads(str(z["meta"])),
+        )
+    except Exception:
+        return None
+
+
+def load_raw_frames(path: str) -> Optional[tuple[list[Frame], dict]]:
+    if not os.path.exists(path) or time.time() - os.path.getmtime(path) > CACHE_TTL_S:
+        return None
+    try:
+        from astropy.wcs import WCS
+        z = np.load(path, allow_pickle=True)
+        meta = json.loads(str(z["meta"]))
+        frames = []
+        for i in range(len(z["times"])):
+            wcs = WCS(dict(z["wcs_headers"][i]), relax=True)
+            frames.append(Frame(
+                url=str(z["urls"][i]),
+                time=float(z["times"][i]),
+                wavelength_um=float(z["wavelengths"][i]),
+                image=np.asarray(z["images"][i], dtype=np.float32),
+                wcs=wcs,
+                flagged_frac=float(z["flagged_frac"][i]),
+            ))
+        return frames, meta
     except Exception:  # noqa: BLE001
         return None
 
 
-# ---------------------------------------------------------------------------
-# Повний конвеєр
-# ---------------------------------------------------------------------------
 def run_pipeline(target_text: str, fov_deg: float, detector: int,
                  progress: ProgressCb = _noop, use_cache: bool = True) -> Stack:
     if not 0.01 <= fov_deg <= 0.3:
@@ -516,48 +519,74 @@ def run_pipeline(target_text: str, fov_deg: float, detector: int,
     if detector not in DETECTOR_BANDS:
         raise ValueError("Детектор має бути від 1 до 6.")
 
-    path = os.path.join(CACHE_DIR, cache_key(target_text, fov_deg, detector) + ".npz")
+    aligned_path = os.path.join(CACHE_DIR, cache_key(target_text, fov_deg, detector) + ".npz")
     if use_cache:
-        cached = load_stack(path)
+        cached = load_stack(aligned_path)
         if cached is not None:
             progress("cache", 1, 1)
             return cached
 
-    progress("resolve", 0, 1)
-    tgt = resolve_target(target_text)
+    raw_path = os.path.join(RAW_CACHE_DIR, raw_cache_key(target_text, detector) + ".npz")
+    frames: Optional[list[Frame]] = None
+    notes: list[str] = []
+    ra_c = dec_c = epoch = None
+    tgt = None
 
-    # 1) Список знімків. Для пошуку беремо позицію на епоху ~2026.0
-    #    (знімки SPHEREx великі, тож похибка в кілька арксекунд не впливає на покриття).
-    ra0, dec0 = propagate(tgt, 2026.0)
-    progress("query", 0, 1)
-    rows = query_frames(ra0, dec0, detector)
-    if not rows:
-        raise RuntimeError("Для цієї ділянки і цього детектора знімків не знайдено.")
-    notes = [tgt.note] if tgt.note else []
-    if len(rows) > MAX_FRAMES:
-        step = math.ceil(len(rows) / MAX_FRAMES)
-        rows = rows[::step]
-        notes.append(f"Знімків забагато, показано кожен {step}-й.")
+    if use_cache:
+        loaded = load_raw_frames(raw_path)
+        if loaded is not None:
+            frames, raw_meta = loaded
+            notes = list(raw_meta.get("notes", []))
+            ra_c = raw_meta["ra"]
+            dec_c = raw_meta["dec"]
+            epoch = raw_meta["epoch"]
+            tgt = Target(ra_c, dec_c, label=raw_meta.get("target", target_text),
+                         pmra=raw_meta.get("pm_mas_yr", [0, 0])[0],
+                         pmdec=raw_meta.get("pm_mas_yr", [0, 0])[1])
+            progress("cache_raw", 1, 1)
 
-    # 2) Епоха центру -- медіана часів знімків. Для швидких зір сітка центрується на цю епоху,
-    #    тож рухомий об'єкт зсувається навколо центру, а не вилітає за межі кадру.
-    years = [y for y in (mjd_to_jyear(t) for _, t in rows) if y is not None]
-    epoch = float(np.median(years)) if years else 2026.0
-    ra_c, dec_c = propagate(tgt, epoch)
+    if frames is None:
+        progress("resolve", 0, 1)
+        tgt = resolve_target(target_text)
 
-    from astropy import units as u
-    from astropy.coordinates import SkyCoord
-    coord = SkyCoord(ra=ra_c * u.deg, dec=dec_c * u.deg, frame="icrs")
+        ra0, dec0 = propagate(tgt, 2026.0)
+        progress("query", 0, 1)
+        rows = query_frames(ra0, dec0, detector)
+        if not rows:
+            raise RuntimeError("Для цієї ділянки і цього детектора знімків не знайдено.")
+        notes = [tgt.note] if tgt.note else []
+        if len(rows) > MAX_FRAMES:
+            step = math.ceil(len(rows) / MAX_FRAMES)
+            rows = rows[::step]
+            notes.append(f"Знімків забагато, показано кожен {step}-й.")
 
-    size = fov_deg * 1.5         # запас на обертання кадрів (>= sqrt(2) * fov)
-    urls_times = [(cutout_url(b, ra_c, dec_c, size), t) for b, t in rows]
-    progress("download", 0, len(urls_times))
-    frames = fetch_frames(urls_times, coord, progress)
-    if not frames:
-        raise RuntimeError("Не вдалося завантажити жодного cutout-а.")
-    failed = len(urls_times) - len(frames)
-    if failed:
-        notes.append(f"Не завантажилося {failed} з {len(urls_times)} знімків.")
+        years = [y for y in (mjd_to_jyear(t) for _, t in rows) if y is not None]
+        epoch = float(np.median(years)) if years else 2026.0
+        ra_c, dec_c = propagate(tgt, epoch)
+
+        from astropy import units as u
+        from astropy.coordinates import SkyCoord
+        coord = SkyCoord(ra=ra_c * u.deg, dec=dec_c * u.deg, frame="icrs")
+
+        urls_times = [(cutout_url(b, ra_c, dec_c, CUTOUT_SIZE), t) for b, t in rows]
+        progress("download", 0, len(urls_times))
+        frames = fetch_frames(urls_times, coord, progress)
+        if not frames:
+            raise RuntimeError("Не вдалося завантажити жодного cutout-а.")
+        failed = len(urls_times) - len(frames)
+        if failed:
+            notes.append(f"Не завантажилося {failed} з {len(urls_times)} знімків.")
+
+        raw_meta = {
+            "target": tgt.label, "ra": round(ra_c, 6), "dec": round(dec_c, 6),
+            "epoch": round(epoch, 2), "detector": detector,
+            "pm_mas_yr": [tgt.pmra, tgt.pmdec],
+            "notes": notes,
+        }
+        try:
+            save_raw_frames(raw_path, frames, raw_meta)
+        except Exception as e: 
+            logging.warning("Кеш сирих кадрів не збережено: %s", e)
 
     progress("align", 0, 1)
     stack = build_stack(frames, ra_c, dec_c, fov_deg, meta={
@@ -568,8 +597,8 @@ def run_pipeline(target_text: str, fov_deg: float, detector: int,
         "notes": notes,
     })
     try:
-        save_stack(path, stack)
-    except Exception as e:  # noqa: BLE001
+        save_stack(aligned_path, stack)
+    except Exception as e: 
         logging.warning("Кеш не збережено: %s", e)
     progress("done", 1, 1)
     return stack
