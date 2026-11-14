@@ -166,10 +166,34 @@ def test_parse_coordinates():
         core.resolve_target("400, 10")
 
 
-def test_proper_motion_propagation():
-    t = core.Target(ra=100.0, dec=0.0, pmra=0.0, pmdec=10000.0)    
-    ra, dec = core.propagate(t, 2026.0)
-    assert dec == pytest.approx(26 * 10.0 / 3600.0, rel=1e-6)
+def test_names_are_rejected_without_any_network(monkeypatch):
+    """Назви об'єктів не підтримуються, і жодного мережевого виклику (довідники) не робиться."""
+    import socket
+
+    def boom(*a, **k):
+        raise AssertionError("мережевий виклик у resolve_target")
+    monkeypatch.setattr(socket.socket, "connect", boom)
+    for name in ("Barnard's star", "eps Ind B", "RW Aur", "x"):
+        with pytest.raises(ValueError):
+            core.resolve_target(name)
+    assert not hasattr(core, "resolve_name") and not hasattr(core, "propagate")
+
+
+def test_normalize_target_gives_single_key():
+    a = core.normalize_target("133.795 -7.245")
+    b = core.normalize_target("133.795, -7.245")
+    assert a == b == "133.79500, -7.24500"
+    assert core.normalize_target("08h55m10.831s -07d14m42.53s") == \
+        core.normalize_target("08 55 10.831 -07 14 42.53")
+    assert core.normalize_target("359.999999 1") == "0.00000, 1.00000"     # без виходу за 360
+
+
+def test_presets_are_valid_coordinates():
+    import app as appmod
+    assert len(appmod.PRESETS) >= 5
+    for p in appmod.PRESETS:
+        t = core.resolve_target(f"{p['ra']}, {p['dec']}")
+        assert 0.01 <= p["fov"] <= 0.3 and t.label
 
 
 def test_http_pipeline_with_mocked_archive(monkeypatch, tmp_path):
@@ -223,5 +247,8 @@ def test_http_pipeline_with_mocked_archive(monkeypatch, tmp_path):
     r1 = client.post("/api/jobs", json={"target": f"{RA0}, {DEC0}", "fov": 0.1, "detector": 2}).json()
     assert r1["job_id"] == jid
 
+    r = client.post("/api/jobs", json={"target": "Barnard's star", "fov": 0.1, "detector": 2})
+    assert r.status_code == 422 and "координати" in r.json()["detail"].lower()
+    assert len(client.get("/api/presets").json()) >= 5
     assert client.post("/api/jobs", json={"target": "x", "fov": 5, "detector": 2}).status_code == 422
     assert client.post("/api/jobs", json={"target": "x", "fov": 0.1, "detector": 9}).status_code == 422

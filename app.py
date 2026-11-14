@@ -5,7 +5,8 @@
 Відкрити: http://127.0.0.1:8000/
 
 API:
-  POST /api/jobs                      {target, fov, detector} -> {job_id}
+  GET  /api/presets                   приклади (координати зашито в коді, без довідників)
+  POST /api/jobs                      {target: "RA, Dec", fov, detector} -> {job_id}
   GET  /api/jobs/{id}                 стан, прогрес, список кадрів (коли готово)
   GET  /api/jobs/{id}/frame/{i}.png   ?mode=raw
   GET  /api/detectors                 довідка про 6 детекторів
@@ -34,10 +35,20 @@ JOBS: dict[str, dict] = {}
 JOB_BY_KEY: dict[str, str] = {}
 KEEP_JOBS = 30
 
+# Захардкоджені приклади. Координати ICRS у градусах; жодних запитів до довідників (SIMBAD тощо).
+# Для швидких об'єктів позицію перенесено вручну на епоху ~2026.0, бо власний рух не враховується.
+PRESETS = [
+    {"name": "WISE 0855", "ra": 133.79513, "dec": -7.24515, "fov": 0.1},
+    {"name": "Barnard's Star", "ra": 269.44626, "dec": 4.76823, "fov": 0.1},
+    {"name": "Epsilon Indi B", "ra": 331.09638, "dec": -56.80109, "fov": 0.05},
+    {"name": "RW Aur", "ra": 76.95654, "dec": 30.40144, "fov": 0.05},
+    {"name": "R Dra", "ra": 248.16792, "dec": 66.75500, "fov": 0.05},
+]
+
 
 class JobRequest(BaseModel):
     target: str = Field(..., min_length=1, max_length=120,
-                        description="Назва об'єкта або 'RA, Dec' у градусах / сексагесимально")
+                        description="Координати 'RA, Dec' у градусах або сексагесимально")
     fov: float = Field(0.1, ge=0.01, le=0.3, description="Поле зору, градуси")
     detector: int = Field(..., ge=1, le=6)
 
@@ -68,13 +79,19 @@ def _run(job: dict) -> None:
 
 @app.post("/api/jobs")
 def create_job(req: JobRequest):
-    key = core.cache_key(req.target, req.fov, req.detector)
+    # Лише координати, без мережі. Назва об'єкта -> 422 одразу, а не збій у фоновому потоці.
+    try:
+        norm = core.normalize_target(req.target)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    key = core.cache_key(norm, req.fov, req.detector)
     with _lock:
         jid = JOB_BY_KEY.get(key)
         if jid and JOBS.get(jid, {}).get("status") in ("queued", "running", "done"):
             return {"job_id": jid}
         jid = uuid.uuid4().hex[:12]
-        job = {"id": jid, "key": key, "req": req.model_dump(), "status": "queued",
+        job = {"id": jid, "key": key, "req": {"target": norm, "fov": req.fov, "detector": req.detector},
+               "status": "queued",
                "stage": "queued", "done": 0, "total": 0, "created": time.time(),
                "stack": None, "error": None}
         JOBS[jid] = job
@@ -109,6 +126,11 @@ def job_frame(job_id: str, index: int):
         raise HTTPException(422, str(e))
     return Response(png, media_type="image/png",
                     headers={"Cache-Control": "public, max-age=3600"})
+
+
+@app.get("/api/presets")
+def presets():
+    return PRESETS
 
 
 @app.get("/api/detectors")

@@ -2,7 +2,7 @@
 Ядро SPHEREx Time-Lapse.
 
 Конвеєр:
-  ціль (назва або RA/Dec) -> TAP-запит до IRSA -> cutout-и (паралельно)
+  координати (RA/Dec) -> TAP-запит до IRSA -> cutout-и (паралельно)
   -> очищення (ZODI, FLAGS) -> вирівнювання на спільну небесну сітку (WCS)
   -> нормування -> PNG-кадри (звичайні та «лише зміни»).
 
@@ -57,12 +57,9 @@ def _noop(stage: str, done: int, total: int) -> None:
 
 @dataclass
 class Target:
-    ra: float                
+    ra: float                 # градуси, ICRS (J2000)
     dec: float
-    pmra: float = 0.0         
-    pmdec: float = 0.0
     label: str = ""
-    note: str = ""
 
 
 def _parse_coords(text: str) -> Optional[tuple[float, float]]:
@@ -86,65 +83,31 @@ def _parse_coords(text: str) -> Optional[tuple[float, float]]:
         return None
 
 
-def _to_float(v) -> float:
-    try:
-        if np.ma.is_masked(v):
-            return 0.0
-        f = float(v)
-        return f if math.isfinite(f) else 0.0
-    except Exception:
-        return 0.0
-
-
-def resolve_name(name: str) -> Target:
-    """Назва -> позиція J2000 + власний рух із SIMBAD (якщо вдасться)."""
-    from astropy import units as u
-    from astropy.coordinates import SkyCoord
-
-    try:
-        from astroquery.simbad import Simbad
-
-        s = Simbad()
-        s.add_votable_fields("pmra", "pmdec")
-        tab = s.query_object(name)
-        if tab is not None and len(tab) > 0:
-            cols = {c.lower(): c for c in tab.colnames}
-            ra_v, dec_v = tab[cols["ra"]][0], tab[cols["dec"]][0]
-            if isinstance(ra_v, (str, bytes)):
-                c = SkyCoord(str(ra_v), str(dec_v), unit=(u.hourangle, u.deg))
-                ra, dec = float(c.ra.deg), float(c.dec.deg)
-            else:
-                ra, dec = float(ra_v), float(dec_v)
-            pmra = _to_float(tab[cols["pmra"]][0]) if "pmra" in cols else 0.0
-            pmdec = _to_float(tab[cols["pmdec"]][0]) if "pmdec" in cols else 0.0
-            return Target(ra, dec, pmra, pmdec, label=name)
-    except Exception as e:  
-        logging.warning("SIMBAD не спрацював для %r: %s", name, e)
-
-    c = SkyCoord.from_name(name)   
-    return Target(float(c.ra.deg), float(c.dec.deg), 0.0, 0.0, label=name,
-                  note="Власний рух не враховано (SIMBAD недоступний).")
-
-
 def resolve_target(text: str) -> Target:
+    """Розбирає ввід користувача. Приймає ЛИШЕ координати (RA, Dec).
+
+    Жодних запитів до SIMBAD/Sesame чи інших довідників: назви об'єктів не підтримуються.
+    """
     text = (text or "").strip()
     if not text:
-        raise ValueError("Вкажіть назву об'єкта або координати.")
+        raise ValueError("Вкажіть координати RA, Dec.")
     p = _parse_coords(text)
-    if p is not None:
-        ra, dec = p
-        if not (0 <= ra < 360 and -90 <= dec <= 90):
-            raise ValueError("RA має бути в [0, 360), Dec в [-90, 90] градусах.")
-        return Target(ra, dec, label=f"{ra:.5f}, {dec:+.5f}")
-    return resolve_name(text)
+    if p is None:
+        raise ValueError(
+            "Потрібні координати RA, Dec. Приклади: '133.795 -7.245' (градуси) "
+            "або '08h55m10.8s -07d14m42s'. Назви об'єктів не підтримуються.")
+    ra, dec = p
+    if not (0 <= ra < 360 and -90 <= dec <= 90):
+        raise ValueError("RA має бути в [0, 360), Dec в [-90, 90] градусах.")
+    return Target(ra, dec, label=f"{ra:.5f}, {dec:+.5f}")
 
 
-def propagate(t: Target, year: float) -> tuple[float, float]:
-    """Лінійно переносить позицію J2000 на епоху `year` (власний рух у мс дуги/рік)."""
-    dt = year - 2000.0
-    dec = t.dec + t.pmdec * dt / 3.6e6
-    ra = t.ra + t.pmra * dt / (3.6e6 * max(math.cos(math.radians(t.dec)), 1e-6))
-    return ra % 360.0, max(-90.0, min(90.0, dec))
+def normalize_target(text: str) -> str:
+    """Канонічний запис координат 'RA, Dec' (градуси, 5 знаків). Єдиний ключ кешу для будь-якого
+    написання однієї точки. Мережі не використовує."""
+    t = resolve_target(text)
+    ra = round(t.ra, 5) % 360.0
+    return f"{ra:.5f}, {round(t.dec, 5):.5f}"
 
 
 def query_frames(ra: float, dec: float, detector: int) -> list[tuple[str, float]]:
@@ -540,29 +503,26 @@ def run_pipeline(target_text: str, fov_deg: float, detector: int,
             ra_c = raw_meta["ra"]
             dec_c = raw_meta["dec"]
             epoch = raw_meta["epoch"]
-            tgt = Target(ra_c, dec_c, label=raw_meta.get("target", target_text),
-                         pmra=raw_meta.get("pm_mas_yr", [0, 0])[0],
-                         pmdec=raw_meta.get("pm_mas_yr", [0, 0])[1])
+            tgt = Target(ra_c, dec_c, label=raw_meta.get("target", target_text))
             progress("cache_raw", 1, 1)
 
     if frames is None:
         progress("resolve", 0, 1)
         tgt = resolve_target(target_text)
 
-        ra0, dec0 = propagate(tgt, 2026.0)
+        ra_c, dec_c = tgt.ra, tgt.dec
         progress("query", 0, 1)
-        rows = query_frames(ra0, dec0, detector)
+        rows = query_frames(ra_c, dec_c, detector)
         if not rows:
             raise RuntimeError("Для цієї ділянки і цього детектора знімків не знайдено.")
-        notes = [tgt.note] if tgt.note else []
+        notes = []
         if len(rows) > MAX_FRAMES:
             step = math.ceil(len(rows) / MAX_FRAMES)
             rows = rows[::step]
             notes.append(f"Знімків забагато, показано кожен {step}-й.")
 
         years = [y for y in (mjd_to_jyear(t) for _, t in rows) if y is not None]
-        epoch = float(np.median(years)) if years else 2026.0
-        ra_c, dec_c = propagate(tgt, epoch)
+        epoch = float(np.median(years)) if years else 2026.0   # лише для підпису в метаданих
 
         from astropy import units as u
         from astropy.coordinates import SkyCoord
@@ -580,7 +540,6 @@ def run_pipeline(target_text: str, fov_deg: float, detector: int,
         raw_meta = {
             "target": tgt.label, "ra": round(ra_c, 6), "dec": round(dec_c, 6),
             "epoch": round(epoch, 2), "detector": detector,
-            "pm_mas_yr": [tgt.pmra, tgt.pmdec],
             "notes": notes,
         }
         try:
@@ -593,7 +552,6 @@ def run_pipeline(target_text: str, fov_deg: float, detector: int,
         "target": tgt.label, "ra": round(ra_c, 6), "dec": round(dec_c, 6),
         "epoch": round(epoch, 2), "fov_deg": fov_deg, "detector": detector,
         "band_um": list(DETECTOR_BANDS[detector]),
-        "pm_mas_yr": [tgt.pmra, tgt.pmdec],
         "notes": notes,
     })
     try:

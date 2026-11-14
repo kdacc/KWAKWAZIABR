@@ -7,13 +7,13 @@ PlanetKwa is an interactive web application that allows users to explore, visual
 
 Repeated observations of the same region of the sky can reveal changes in astronomical objects, including variations in brightness and apparent position. PlanetKwa makes these observations easier to explore by providing tools for retrieving and comparing images from different points in time.
 
-Users can search for an astronomical object, browse its available observations, switch between observation dates, and visualize differences between images.
+Users can enter sky coordinates, browse its available observations, switch between observation dates, and visualize differences between images.
 
 ## Key Features
 
 ### Astronomical Object Search
-- Search for astronomical objects by name.
-- Search by celestial coordinates (Right Ascension and Declination).
+- Search by celestial coordinates (Right Ascension and Declination), in degrees or sexagesimal.
+- Ready-made examples are built in (coordinates are hard-coded; no name-resolver/catalog lookups are made).
 - Retrieve available SPHEREx observations for the selected sky region.
 - Browse observations from different dates.
 
@@ -41,7 +41,7 @@ PlanetKwa provides several ways to compare astronomical observations:
 
 PlanetKwa follows a straightforward workflow:
 
-1. **Search** – enter an astronomical object's name or RA/Dec coordinates.
+1. **Search** – enter RA/Dec coordinates (or pick a built-in example).
 2. **Retrieve** – find available SPHEREx observations covering the selected sky region.
 3. **Visualize** – load and display observation images with their associated metadata.
 4. **Compare** – select observations from different dates and use the available comparison modes.
@@ -65,7 +65,7 @@ The processing pipeline includes:
 
 The application supports exploration of astronomical objects selected to demonstrate different types of temporal behavior:
 
-- **Barnard's Star**
+- **Barnard's Star** (position moved by hand to epoch ~2026.0)
 - **Epsilon Indi B**
 - **WISE 0855**
 - **RW Aurigae**
