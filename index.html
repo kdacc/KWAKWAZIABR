@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SPHEREx Time-Lapse</title>
+<style>
+  :root { --bg:#0b0e14; --panel:#141923; --line:#252c3a; --text:#e6e9ef; --dim:#8b94a7; --acc:#6aa9ff; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.45 system-ui, sans-serif; }
+  header { padding:14px 20px; border-bottom:1px solid var(--line); }
+  header h1 { margin:0; font-size:18px; }
+  header p { margin:2px 0 0; color:var(--dim); font-size:13px; }
+  main { display:grid; grid-template-columns:320px 1fr; gap:16px; padding:16px 20px; max-width:1200px; margin:0 auto; }
+  @media (max-width: 800px) { main { grid-template-columns:1fr; } }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px; }
+  label { display:block; font-size:12px; color:var(--dim); margin:10px 0 4px; }
+  input[type=text], input[type=number], select { width:100%; padding:8px; border-radius:6px; border:1px solid var(--line);
+    background:#0e121a; color:var(--text); font:inherit; }
+  button { cursor:pointer; padding:8px 12px; border-radius:6px; border:1px solid var(--line); background:#1b2230; color:var(--text); font:inherit; }
+  button.primary { background:var(--acc); color:#06101f; border-color:var(--acc); font-weight:600; width:100%; margin-top:14px; }
+  button:disabled { opacity:.5; cursor:default; }
+  .presets { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
+  .presets button { font-size:12px; padding:4px 8px; }
+  .modes { display:flex; gap:14px; margin-top:6px; font-size:14px; }
+  .modes label { display:flex; gap:6px; align-items:center; margin:0; color:var(--text); font-size:14px; }
+  #stage { display:flex; flex-direction:column; gap:10px; }
+  #viewer { position:relative; background:#000; border-radius:8px; aspect-ratio:1/1; max-height:70vh; margin:0 auto; width:100%;
+    display:flex; align-items:center; justify-content:center; overflow:hidden; }
+  #viewer img { width:100%; height:100%; object-fit:contain; image-rendering:pixelated; }
+  #msg { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; text-align:center; padding:20px; color:var(--dim); }
+  #msg.error { color:#ff8a8a; }
+  .bar { height:6px; background:#0e121a; border-radius:3px; overflow:hidden; margin-top:10px; display:none; }
+  .bar > div { height:100%; width:0; background:var(--acc); transition:width .2s; }
+  #hud { position:absolute; left:8px; bottom:8px; background:rgba(0,0,0,.6); padding:4px 8px; border-radius:6px; font-size:12px; font-family:ui-monospace, monospace; }
+  .controls { display:flex; gap:10px; align-items:center; }
+  .controls input[type=range] { flex:1; }
+  .small { font-size:12px; color:var(--dim); }
+  .notes { color:#e8c36a; font-size:12px; margin-top:6px; }
+  .hint { font-size:12px; color:var(--dim); margin-top:8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>SPHEREx Time-Lapse</h1>
+  <p>Послідовні знімки ділянки неба: об'єкти, що рухаються, зсуваються між кадрами.</p>
+</header>
+<main>
+  <section class="panel">
+    <label for="target">Об'єкт або координати (RA, Dec)</label>
+    <input id="target" type="text" placeholder="напр. 08h55m10.831s -07d14m42.53s" value="08h55m10.831s -07d14m42.53s">
+    <div class="presets" id="presets"></div>
+
+    <label for="fov">Поле зору, градуси (0.01–0.3)</label>
+    <input id="fov" type="number" min="0.01" max="0.3" step="0.01" value="0.1">
+
+    <label for="det">Детектор</label>
+    <select id="det"></select>
+
+    <label>Режим показу</label>
+    <div class="modes">
+      <label><input type="radio" name="mode" value="raw" checked> Усе небо</label>
+      <label><input type="radio" name="mode" value="diff"> Лише зміни</label>
+    </div>
+
+    <button class="primary" id="go">Завантажити кадри</button>
+    <div class="bar" id="bar"><div></div></div>
+    <div class="small" id="status"></div>
+    <div class="notes" id="notes"></div>
+    <div class="hint">Різні детектори бачать різні довжини хвиль, тому їхні кадри не змішуються.
+      Координати, введені числами, вважаються позицією на момент знімання.</div>
+  </section>
+
+  <section class="panel" id="stage">
+    <div id="viewer">
+      <div id="msg">Виберіть детектор і натисніть «Завантажити кадри».</div>
+      <img id="img" alt="" hidden>
+      <div id="hud" hidden></div>
+    </div>
+    <div class="controls">
+      <button id="play" disabled>▶</button>
+      <input id="slider" type="range" min="0" max="0" value="0" disabled>
+      <select id="fps" title="Швидкість">
+        <option value="2">2 к/с</option><option value="4" selected>4 к/с</option>
+        <option value="8">8 к/с</option><option value="12">12 к/с</option>
+      </select>
+    </div>
+    <div class="small" id="info"></div>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const PRESETS = [
+  ["WISE 0855", "08h55m10.831s -07d14m42.53s", 0.1],
+  ["Barnard's Star", "Barnard's star", 0.1],
+  ["Epsilon Indi B", "eps Ind B", 0.05],
+  ["RW Aur", "RW Aur", 0.05],
+  ["R Dra", "R Dra", 0.05],
+];
+let job = null, frames = [], timer = null, cur = 0, images = {raw: [], diff: []}, mode = "raw", poll = null;
+
+// --- ініціалізація ---------------------------------------------------------
+fetch("/api/detectors").then(r => r.json()).then(list => {
+  $("det").innerHTML = list.map(d =>
+    `<option value="${d.detector}">D${d.detector}: ${d.band_um[0]}–${d.band_um[1]} мкм</option>`).join("");
+  applyUrl();
+});
+$("presets").innerHTML = PRESETS.map((p, i) => `<button data-i="${i}">${p[0]}</button>`).join("");
+$("presets").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  const p = PRESETS[b.dataset.i]; $("target").value = p[1]; $("fov").value = p[2];
+});
+
+function applyUrl() {
+  const q = new URLSearchParams(location.search);
+  const t = q.get("target") || (q.get("ra") && q.get("dec") ? `${q.get("ra")}, ${q.get("dec")}` : null);
+  if (t) $("target").value = t;
+  if (q.get("fov")) $("fov").value = q.get("fov");
+  if (q.get("det")) $("det").value = q.get("det");
+  if (q.get("mode") === "diff") document.querySelector('input[value=diff]').checked = true;
+  if (t) start();
+}
+function updateUrl() {
+  const q = new URLSearchParams({target: $("target").value, fov: $("fov").value, det: $("det").value,
+    mode: document.querySelector('input[name=mode]:checked').value});
+  history.replaceState(null, "", "?" + q.toString());
+}
+
+// --- запуск завдання -------------------------------------------------------
+$("go").onclick = start;
+async function start() {
+  stopPlay(); clearInterval(poll);
+  frames = []; images = {raw: [], diff: []};
+  $("img").hidden = true; $("hud").hidden = true; $("notes").textContent = ""; $("info").textContent = "";
+  setMsg("Запит до архіву IRSA… (може тривати до хвилини)");
+  $("go").disabled = true; $("bar").style.display = "block"; setBar(0);
+  updateUrl();
+  try {
+    const r = await fetch("/api/jobs", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({target: $("target").value, fov: parseFloat($("fov").value), detector: parseInt($("det").value)})});
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(body.detail ? JSON.stringify(body.detail) : r.statusText);
+    job = body.job_id;
+    poll = setInterval(check, 1000); check();
+  } catch (e) { fail(e.message); }
+}
+const STAGES = {queued: "У черзі", resolve: "Визначення координат", query: "Пошук знімків у TAP", cache: "Беру з кешу",
+  download: "Завантаження cutout-ів", align: "Вирівнювання кадрів", done: "Готово"};
+async function check() {
+  try {
+    const s = await (await fetch("/api/jobs/" + job)).json();
+    if (s.status === "error") { clearInterval(poll); return fail(s.error); }
+    $("status").textContent = (STAGES[s.stage] || s.stage) + (s.total > 1 ? ` — ${s.done}/${s.total}` : "");
+    setBar(s.total ? s.done / s.total : 0);
+    if (s.status === "done") { clearInterval(poll); ready(s.result); }
+  } catch (e) { clearInterval(poll); fail(e.message); }
+}
+function setBar(f) { $("bar").firstElementChild.style.width = Math.round(f * 100) + "%"; }
+function setMsg(t, err) { const m = $("msg"); m.textContent = t; m.className = err ? "error" : ""; m.hidden = !t; }
+function fail(t) { $("go").disabled = false; $("bar").style.display = "none"; $("status").textContent = ""; setMsg(t, true); }
+
+// --- відтворення -----------------------------------------------------------
+function ready(res) {
+  $("go").disabled = false; $("bar").style.display = "none"; $("status").textContent = `Кадрів: ${res.count}`;
+  frames = res.frames; mode = document.querySelector('input[name=mode]:checked').value;
+  const n = res.meta.notes || []; $("notes").textContent = n.join(" ");
+  $("slider").max = frames.length - 1; $("slider").disabled = false; $("play").disabled = false;
+  preload(mode); cur = 0; show(0); setMsg("");
+  $("info").textContent = `Ціль: ${res.meta.target}; центр ${res.meta.ra}, ${res.meta.dec} (епоха ${res.meta.epoch}); ` +
+    `піксель SPHEREx ≈ ${res.meta.native_pixel_arcsec}″; пропущено без покриття: ${res.meta.skipped_no_coverage}.`;
+  play();
+}
+function url(i, m) { return `/api/jobs/${job}/frame/${i}.png?mode=${m}`; }
+function preload(m) {
+  if (images[m].length) return;
+  images[m] = frames.map((_, i) => { const im = new Image(); im.src = url(i, m); return im; });
+}
+function show(i) {
+  cur = i; const f = frames[i];
+  const im = $("img"); im.hidden = false;
+  im.src = images[mode][i] && images[mode][i].complete ? images[mode][i].src : url(i, mode);
+  $("slider").value = i;
+  const hud = $("hud"); hud.hidden = false;
+  hud.textContent = `${i + 1}/${frames.length}  ${f.utc || "MJD " + f.time.toFixed(3)}  λ ≈ ${f.wavelength_um ?? "?"} мкм`;
+}
+function play() { stopPlay(); $("play").textContent = "⏸";
+  timer = setInterval(() => show((cur + 1) % frames.length), 1000 / parseInt($("fps").value)); }
+function stopPlay() { clearInterval(timer); timer = null; $("play").textContent = "▶"; }
+$("play").onclick = () => timer ? stopPlay() : play();
+$("slider").oninput = e => { stopPlay(); show(parseInt(e.target.value)); };
+$("fps").onchange = () => { if (timer) play(); };
+document.querySelectorAll('input[name=mode]').forEach(r => r.onchange = e => {
+  mode = e.target.value; updateUrl();
+  if (!frames.length) return; preload(mode); show(cur);
+});
+document.addEventListener("keydown", e => {
+  if (!frames.length || e.target.tagName === "INPUT" && e.target.type === "text") return;
+  if (e.key === "ArrowRight") { stopPlay(); show((cur + 1) % frames.length); }
+  if (e.key === "ArrowLeft") { stopPlay(); show((cur - 1 + frames.length) % frames.length); }
+  if (e.key === " ") { e.preventDefault(); $("play").click(); }
+});
+</script>
+</body>
+</html>

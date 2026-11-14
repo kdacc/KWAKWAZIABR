@@ -1,0 +1,12 @@
+numpy
+astropy
+astroquery
+pyvo
+reproject
+scipy
+pillow
+fastapi
+uvicorn[standard]
+# для тестів:
+pytest
+httpx
