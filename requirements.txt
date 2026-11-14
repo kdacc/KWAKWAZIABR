@@ -7,6 +7,7 @@ scipy
 pillow
 fastapi
 uvicorn[standard]
+reportlab
 # для тестів:
 pytest
 httpx
