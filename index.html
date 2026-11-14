@@ -91,6 +91,7 @@
     </div>
 
     <button class="primary" id="go">Завантажити кадри</button>
+    <button id="btn-report" class="ctrl-btn" title="Створити звіт">Звіт</button>
     <div class="bar" id="bar"><div></div></div>
     <div class="small" id="status"></div>
     <div class="notes" id="notes"></div>
@@ -318,6 +319,32 @@ document.addEventListener("keydown", e => {
   if (e.key === "ArrowLeft") { stopPlay(); show((cur - 1 + frames.length) % frames.length); }
   if (e.key === " ") { e.preventDefault(); $("play").click(); }
 });
+
+// --- Report form toggles ---
+$("btn-report").onclick = () => {
+  if (!frames.length) return;
+  $("report-form").style.display = "block";
+  $("btn-report").disabled = true;
+  const detVal =$("det").value || "N/A";
+  $("report-detector").value = detVal;
+  const detInfo = core ? core.DETECTOR_BANDS : {};
+  $("report-det-band").textContent = detInfo[detVal] ? `${detInfo[detVal][0]}–${detInfo[detVal][1]} мкм` : "--";
+  $("report-fov").value = $("fov").value;
+  $("report-total").value = frames.length;
+  $("report-frame").value = cur;
+  updateReportDate();
+};
+function updateReportDate() {
+  const fnum = parseInt($("report-frame").value);
+  if (fnum >= 0 && fnum < frames.length) {
+    const f = frames[fnum];
+    $("report-date").textContent = f.utc || `MJD ${f.time.toFixed(3)}`;
+  } else {
+    $("report-date").textContent = "--";
+  }
+}
+$("report-frame").oninput = updateReportDate;
+$("btn-cancel-report").onclick = () => { $("report-form").style.display = "none"; $("btn-report").disabled = false; reportJob = null; };
 </script>
 </body>
 </html>
