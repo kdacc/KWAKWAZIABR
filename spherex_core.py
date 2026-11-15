@@ -1,14 +1,3 @@
-"""
-Ядро SPHEREx Time-Lapse.
-
-Конвеєр:
-  координати (RA/Dec) -> TAP-запит до IRSA -> cutout-и (паралельно)
-  -> очищення (ZODI, FLAGS) -> вирівнювання на спільну небесну сітку (WCS)
-  -> нормування -> PNG-кадри (звичайні та «лише зміни»).
-
-Запит до TAP і формат cutout-URL взято з туторіалу IRSA
-(https://caltech-ipac.github.io/irsa-tutorials/spherex-cutouts).
-"""
 from __future__ import annotations
 
 import concurrent.futures as cf
@@ -43,14 +32,14 @@ FLAG_FALLBACK_FRAC = 0.6
 MAX_FOV_DEG = 0.3          
 CUTOUT_SIZE = MAX_FOV_DEG * 1.5      
 
-# Діапазони довжин хвиль детекторів (з документації IRSA)
+
 DETECTOR_BANDS = {
     1: (0.75, 1.09), 2: (1.10, 1.62), 3: (1.63, 2.41),
     4: (2.42, 3.82), 5: (3.83, 4.41), 6: (4.42, 5.00),
 }
 
 class Cancelled(Exception):
-    """Користувач скасував завдання"""
+    pass
 
 
 ProgressCb = Callable[[str, int, int], None]
@@ -62,13 +51,12 @@ def _noop(stage: str, done: int, total: int) -> None:
 
 @dataclass
 class Target:
-    ra: float                 # градуси, ICRS (J2000)
+    ra: float
     dec: float
     label: str = ""
 
 
 def _parse_coords(text: str) -> Optional[tuple[float, float]]:
-    """'210.8, 54.3' або '08h55m10.831s -07d14m42.53s' -> (ra, dec) у градусах."""
     from astropy import units as u
     from astropy.coordinates import SkyCoord
 
@@ -89,10 +77,6 @@ def _parse_coords(text: str) -> Optional[tuple[float, float]]:
 
 
 def resolve_target(text: str) -> Target:
-    """Розбирає ввід користувача. Приймає ЛИШЕ координати (RA, Dec).
-
-    Жодних запитів до SIMBAD/Sesame чи інших довідників: назви об'єктів не підтримуються.
-    """
     text = (text or "").strip()
     if not text:
         raise ValueError("Вкажіть координати RA, Dec.")
@@ -108,19 +92,12 @@ def resolve_target(text: str) -> Target:
 
 
 def normalize_target(text: str) -> str:
-    """Канонічний запис координат 'RA, Dec' (градуси, 5 знаків). Єдиний ключ кешу для будь-якого
-    написання однієї точки. Мережі не використовує."""
     t = resolve_target(text)
     ra = round(t.ra, 5) % 360.0
     return f"{ra:.5f}, {round(t.dec, 5):.5f}"
 
 
 def query_frames(ra: float, dec: float, detector: int) -> list[tuple[str, float]]:
-    """
-    Повертає [(base_uri, time), ...] відсортований за часом.
-    base_uri -- шлях без параметрів cutout (їх додаємо пізніше, коли знаємо епоху).
-    time -- time_bounds_lower із таблиці spherex.plane (у туторіалі підписаний як дні).
-    """
     from astroquery.ipac.irsa import Irsa
 
     detector = int(detector)
@@ -150,7 +127,6 @@ def cutout_url(base_uri: str, ra: float, dec: float, size_deg: float) -> str:
     return f"{IRSA_BASE}{base_uri}?center={ra},{dec}d&size={size_deg}"
 
 
-
 @dataclass
 class Frame:
     url: str
@@ -162,7 +138,6 @@ class Frame:
 
 
 def clean_image(image, zodi, flags) -> tuple[Optional[np.ndarray], float]:
-    """IMAGE - ZODI, маска за FLAGS, віднімання фону. Повертає (масив або None, частка позначених)."""
     img = np.asarray(image).astype(np.float32) - np.asarray(zodi).astype(np.float32)
     bad = ~np.isfinite(img)
     flagged = (np.asarray(flags).astype(np.int64) & FLAG_MASK) != 0
@@ -177,7 +152,6 @@ def clean_image(image, zodi, flags) -> tuple[Optional[np.ndarray], float]:
 
 
 def load_cutout(url: str, coord, time_value: float, retries: int = 2) -> Optional[Frame]:
-    """Завантажує cutout, читає HDU, рахує довжину хвилі в позиції цілі."""
     from astropy.io import fits
     from astropy.utils.data import conf
     from astropy.wcs import WCS
@@ -214,11 +188,6 @@ def load_cutout(url: str, coord, time_value: float, retries: int = 2) -> Optiona
 
 def fetch_frames(urls_times: list[tuple[str, float]], coord,
                  progress: ProgressCb = _noop) -> list[Frame]:
-    """Паралельне завантаження; порядок за часом зберігається.
-
-    Якщо progress кидає виняток (наприклад Cancelled), нові завантаження не стартують,
-    а функція одразу виходить, НЕ чекаючи кадрів, що вже тягнуться з мережі.
-    """
     total = len(urls_times)
     done = 0
     results: list[Optional[Frame]] = [None] * total
@@ -247,7 +216,6 @@ def fetch_frames(urls_times: list[tuple[str, float]], coord,
 
 
 def make_grid(ra: float, dec: float, fov_deg: float, native_scale_arcsec: float):
-    """Небесна сітка TAN навколо (ra, dec) з північчю вгору і сходом ліворуч."""
     from astropy.wcs import WCS
 
     scale = native_scale_arcsec / OVERSAMPLE                    
@@ -271,7 +239,6 @@ def native_pixel_scale_arcsec(wcs) -> float:
 
 
 def align_frames(frames: list[Frame], grid_wcs, shape) -> tuple[np.ndarray, list[Frame]]:
-    """Перепроєктовує кадри на сітку. Яскравість поверхнева (МДж/ср), тому лише інтерполяція."""
     from reproject import reproject_interp
 
     out, kept = [], []
@@ -296,7 +263,6 @@ def robust_sigma(a: np.ndarray) -> float:
 
 
 def normalize_stack(stack: np.ndarray) -> np.ndarray:
-    """Кожен кадр ділимо на власний шум, щоб кадри різних довжин хвиль виглядали узгоджено."""
     out = np.empty_like(stack)
     for i in range(stack.shape[0]):
         out[i] = stack[i] / robust_sigma(stack[i])
@@ -308,7 +274,6 @@ def _asinh(x: np.ndarray, soft: float = 3.0) -> np.ndarray:
 
 
 def to_gray_raw(norm: np.ndarray) -> np.ndarray:
-    """Загальний для всього детектора розтяг -> uint8 (N, h, w)."""
     finite = norm[np.isfinite(norm)]
     lo = -3.0
     hi = float(np.clip(np.percentile(finite, 99.8), 8.0, 400.0)) if finite.size else 10.0
@@ -318,7 +283,6 @@ def to_gray_raw(norm: np.ndarray) -> np.ndarray:
 
 
 def to_gray_diff(diff: np.ndarray, span: float = 8.0) -> np.ndarray:
-    """Нуль змін = сірий; яскравіше = ставало яскравішим; темніше = слабшим."""
     t = 0.5 + 0.5 * np.clip(_asinh(diff) / _asinh(np.array(span)), -1, 1)
     t = np.nan_to_num(t, nan=0.5)
     return (t * 255).astype(np.uint8)
@@ -327,7 +291,7 @@ def to_gray_diff(diff: np.ndarray, span: float = 8.0) -> np.ndarray:
 def gray_to_png(gray2d: np.ndarray, min_side: int = 512) -> bytes:
     from PIL import Image
 
-    img = np.flipud(gray2d)            # північ угорі (масив має початок знизу)
+    img = np.flipud(gray2d)
     im = Image.fromarray(img, mode="L")
     k = max(1, math.ceil(min_side / max(im.size)))
     if k > 1:
@@ -335,7 +299,6 @@ def gray_to_png(gray2d: np.ndarray, min_side: int = 512) -> bytes:
     buf = io.BytesIO()
     im.save(buf, format="PNG", optimize=True)
     return buf.getvalue()
-
 
 
 def mjd_to_utc(t: float) -> str:
@@ -359,7 +322,6 @@ def mjd_to_jyear(t: float) -> Optional[float]:
 
 
 class Stack:
-    """Вирівняний набір кадрів одного детектора + ліниво рахований рендер."""
 
     def __init__(self, aligned: np.ndarray, times, wavelengths, urls, meta: dict):
         self.aligned = aligned.astype(np.float32)
@@ -492,7 +454,7 @@ def load_raw_frames(path: str) -> Optional[tuple[list[Frame], dict]]:
                 flagged_frac=float(z["flagged_frac"][i]),
             ))
         return frames, meta
-    except Exception:  # noqa: BLE001
+    except Exception:
         return None
 
 
@@ -544,7 +506,7 @@ def run_pipeline(target_text: str, fov_deg: float, detector: int,
             notes.append(f"Знімків забагато, показано кожен {step}-й.")
 
         years = [y for y in (mjd_to_jyear(t) for _, t in rows) if y is not None]
-        epoch = float(np.median(years)) if years else 2026.0   # лише для підпису в метаданих
+        epoch = float(np.median(years)) if years else 2026.0
 
         from astropy import units as u
         from astropy.coordinates import SkyCoord
