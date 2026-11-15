@@ -40,6 +40,36 @@
   .presets { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
   .presets button { font-size:12px; padding:4px 10px; border-radius:20px; }
   .modes { display:flex; gap:14px; margin-top:6px; }
+  :root { --bg:#0b0e14; --panel:#141923; --line:#252c3a; --text:#e6e9ef; --dim:#8b94a7; --acc:#6aa9ff; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.45 system-ui, sans-serif; }
+  header { padding:14px 20px; border-bottom:1px solid var(--line); }
+  header h1 { margin:0; font-size:18px; }
+  header p { margin:2px 0 0; color:var(--dim); font-size:13px; }
+  main { display:grid; grid-template-columns:320px 1fr; gap:16px; padding:16px 20px; max-width:1200px; margin:0 auto; }
+  @media (max-width: 800px) { main { grid-template-columns:1fr; } }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px; }
+  label { display:block; font-size:12px; color:var(--dim); margin:10px 0 4px; }
+  input[type=text], input[type=number], select { width:100%; padding:8px; border-radius:6px; border:1px solid var(--line);
+    background:#0e121a; color:var(--text); font:inherit; }
+  button { cursor:pointer; padding:8px 12px; border-radius:6px; border:1px solid var(--line); background:#1b2230; color:var(--text); font:inherit; }
+  button.primary { background:var(--acc); color:#06101f; border-color:var(--acc); font-weight:600; width:100%; margin-top:14px; }
+  button:disabled { opacity:.5; cursor:default; }
+  .actions { display:flex; gap:8px; margin-top:14px; }
+  .actions button.primary { margin-top:0; width:auto; flex:1; }
+  button.cancel { flex:none; position:relative; white-space:nowrap; font-weight:600; color:#ff9a9a; background:transparent;
+    border-color:#5a2f36; transition:transform .12s ease, background .15s, opacity .2s; }
+  button.cancel:hover { background:rgba(255,100,100,.12); }
+  button.cancel:active { transform:scale(.93); }
+  button.cancel.idle { opacity:.55; }                    /* нічого не завантажується: приглушена, але клікабельна */
+  button.cancel.pop::after { content:""; position:absolute; inset:-1px; border-radius:6px; border:2px solid #ff9a9a;
+    pointer-events:none; animation:cancel-ring .45s ease-out forwards; }
+  button.cancel.nudge { animation:cancel-nudge .3s; }
+  @keyframes cancel-ring { from { opacity:.9; transform:scale(1); } to { opacity:0; transform:scale(1.18, 1.5); } }
+  @keyframes cancel-nudge { 25% { transform:translateX(-3px); } 75% { transform:translateX(3px); } }
+  .presets { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
+  .presets button { font-size:12px; padding:4px 8px; }
+  .modes { display:flex; gap:14px; margin-top:6px; font-size:14px; }
   .modes label { display:flex; gap:6px; align-items:center; margin:0; color:var(--text); font-size:14px; }
   input[type=radio], input[type=checkbox] { accent-color:var(--a1); }
 
@@ -324,6 +354,7 @@
 <script>
 const $ = id => document.getElementById(id);
 let PRESETS = []; 
+let running = false, starting = false, cancelAsked = false, cancelling = false;
 let job = null, frames = [], timer = null, cur = 0, images = {raw: [], diff: []}, mode = "raw", poll = null, speedMult = 1.0, selStart = null, selEnd = null, cutMode = false;
 let lastResult = null;
 
@@ -634,6 +665,7 @@ async function start() {
   $("img").hidden = true; $("hud").hidden = true; $("notes").textContent = ""; $("info").textContent = "";
   setMsg("Запит до архіву IRSA… (може тривати до хвилини)");
   $("go").disabled = true; $("bar").style.display = "block"; setBar(0);
+  setRunning(true); starting = true; cancelAsked = false;
   updateUrl();
   try {
     const r = await fetch("/api/jobs", {method: "POST", headers: {"Content-Type": "application/json"},
@@ -641,24 +673,63 @@ async function start() {
     const body = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(typeof body.detail === "string" ? body.detail
       : body.detail ? JSON.stringify(body.detail) : r.statusText);
-    job = body.job_id;
+    starting = false; job = body.job_id;
+    if (cancelAsked) { cancelAsked = false; return cancelJob(); }   // натиснули «Скасувати», поки йшов POST
     poll = setInterval(check, 1000); check();
-  } catch (e) { fail(e.message); }
+  } catch (e) { starting = false; fail(e.message); }
 }
 const STAGES = {queued: "У черзі", resolve: "Визначення координат", query: "Пошук знімків у TAP", cache: "Беру з кешу",
-  download: "Завантаження cutout-ів", align: "Вирівнювання кадрів", done: "Готово"};
+  download: "Завантаження cutout-ів", align: "Вирівнювання кадрів", done: "Готово", cancelled: "Скасовано"};
 async function check() {
+  const id = job;
+  if (!id) return;
   try {
-    const s = await (await fetch("/api/jobs/" + job)).json();
+    const s = await (await fetch("/api/jobs/" + id)).json();
+    if (id !== job) return;                     // за цей час скасували або запустили інше завдання
+    if (s.status === "cancelled") { clearInterval(poll); return cancelled(); }
     if (s.status === "error") { clearInterval(poll); return fail(s.error); }
     $("status").textContent = (STAGES[s.stage] || s.stage) + (s.total > 1 ? ` — ${s.done}/${s.total}` : "");
     setBar(s.total ? s.done / s.total : 0);
     if (s.status === "done") { clearInterval(poll); ready(s.result); }
-  } catch (e) { clearInterval(poll); fail(e.message); }
+  } catch (e) { if (id !== job) return; clearInterval(poll); fail(e.message); }
 }
+
+// --- скасування (кнопка завжди на місці й клікабельна) -----------------------
+function setRunning(on) { running = on; $("cancel").classList.toggle("idle", !on); }
+function flashStatus(t) {
+  const el = $("status"), old = el.textContent; el.textContent = t;
+  setTimeout(() => { if (el.textContent === t) el.textContent = old; }, 1500);
+}
+function animate(btn, cls) { btn.classList.remove("pop", "nudge"); void btn.offsetWidth; btn.classList.add(cls); }
+function cancelled() {
+  setRunning(false); job = null;
+  $("go").disabled = false; $("bar").style.display = "none";
+  $("status").textContent = "Скасовано";
+  setMsg("Завантаження скасовано. Натисніть «Завантажити кадри», щоб почати знову.");
+}
+async function cancelJob() {
+  const id = job; if (!id || cancelling) return;
+  cancelling = true; $("status").textContent = "Скасовую…";
+  try {
+    const r = await fetch(`/api/jobs/${id}/cancel`, {method: "POST"});
+    const b = await r.json().catch(() => ({}));
+    if (id !== job) return;
+    if (r.ok && b.status === "done") { check(); return; }     // встигло завершитись: покажемо результат
+    clearInterval(poll); cancelled();
+  } catch (e) {
+    $("status").textContent = "Не вдалося скасувати: " + e.message;
+  } finally { cancelling = false; }
+}
+$("cancel").onclick = () => {
+  const btn = $("cancel");
+  if (!running) { animate(btn, "nudge"); flashStatus("Немає активного завантаження"); return; }
+  animate(btn, "pop");
+  if (starting) { cancelAsked = true; return; }               // job_id ще не отримано: скасуємо щойно прийде
+  cancelJob();
+};
 function setBar(f) { $("bar").firstElementChild.style.width = Math.round(f * 100) + "%"; }
 function setMsg(t, err) { const m = $("msg"); m.textContent = t; m.className = err ? "error" : ""; m.hidden = !t; }
-function fail(t) { $("go").disabled = false; $("bar").style.display = "none"; $("status").textContent = ""; setMsg(t, true); }
+function fail(t) { setRunning(false); $("go").disabled = false; $("bar").style.display = "none"; $("status").textContent = ""; setMsg(t, true); }
 
 $("btn-speed").onclick = () => {
   if (speedMult === 1) speedMult = 2;

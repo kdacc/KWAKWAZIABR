@@ -252,3 +252,122 @@ def test_http_pipeline_with_mocked_archive(monkeypatch, tmp_path):
     assert len(client.get("/api/presets").json()) >= 5
     assert client.post("/api/jobs", json={"target": "x", "fov": 5, "detector": 2}).status_code == 422
     assert client.post("/api/jobs", json={"target": "x", "fov": 0.1, "detector": 9}).status_code == 422
+
+
+@pytest.fixture
+def cancel_env(monkeypatch, tmp_path):
+    """Клієнт + керований «повільний» завантажувач кадрів (відпускається подією gate)."""
+    import threading
+    from fastapi.testclient import TestClient
+    import app as appmod
+
+    frames = make_frames(6)
+    by_url = {f.url: f for f in frames}
+    gate = threading.Event()
+    slow = {"on": True}
+
+    def fake_load(url, coord, t, retries=2):
+        if slow["on"]:
+            gate.wait(timeout=10)
+        return by_url[url]
+
+    monkeypatch.setattr(core, "query_frames", lambda ra, dec, det: [(f.url, f.time) for f in frames])
+    monkeypatch.setattr(core, "cutout_url", lambda base, ra, dec, size: base)
+    monkeypatch.setattr(core, "load_cutout", fake_load)
+    monkeypatch.setattr(core, "CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(core, "RAW_CACHE_DIR", str(tmp_path / "cache" / "raw"))
+    monkeypatch.setattr(core, "mjd_to_jyear", lambda t: 2026.0)
+    appmod.JOBS.clear()                          # глобальний стан з інших тестів
+    appmod.JOB_BY_KEY.clear()
+    client = TestClient(appmod.app)
+    yield client, appmod, slow, gate
+    gate.set()                                   # не лишати завислих потоків
+    time.sleep(0.3)
+
+
+def _post(client, det, target=f"{RA0}, {DEC0}"):
+    r = client.post("/api/jobs", json={"target": target, "fov": 0.1, "detector": det})
+    assert r.status_code == 200, r.text
+    return r.json()["job_id"]
+
+
+def _wait(client, jid, wanted, timeout=8.0):
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        s = client.get(f"/api/jobs/{jid}").json()
+        if s["status"] in wanted:
+            return s
+        time.sleep(0.05)
+    raise AssertionError(f"{jid}: не дійшло до {wanted}, зараз {s['status']}/{s['stage']}")
+
+
+def test_cancel_during_download_is_immediate_and_discards_result(cancel_env):
+    client, appmod, slow, gate = cancel_env
+    jid = _post(client, 1)
+    _wait(client, jid, ("running",))
+    r = client.post(f"/api/jobs/{jid}/cancel")
+    assert r.status_code == 200 and r.json() == {"ok": True, "status": "cancelled"}
+    assert client.get(f"/api/jobs/{jid}").json()["status"] == "cancelled"
+    gate.set()                                   # «мережа» нарешті відповіла
+    time.sleep(0.7)
+    s = client.get(f"/api/jobs/{jid}").json()
+    assert s["status"] == "cancelled" and "result" not in s       # статус не перетерто на done
+    assert appmod.JOBS[jid]["stack"] is None
+    assert client.get(f"/api/jobs/{jid}/frame/0.png").status_code == 404
+
+
+def test_cancelled_jobs_do_not_block_new_jobs(cancel_env):
+    """Регресія: скасовані завдання, що ще тягнуть кадри, не повинні тримати слоти."""
+    client, appmod, slow, gate = cancel_env
+    ids = [_post(client, d) for d in (1, 2)]                       # заповнили обидва слоти
+    for i in ids:
+        _wait(client, i, ("running",))
+    for i in ids:
+        client.post(f"/api/jobs/{i}/cancel")
+    slow["on"] = False                                             # новий запит вантажиться швидко
+    new = _post(client, 3)
+    s = _wait(client, new, ("done", "error"), timeout=6)
+    assert s["status"] == "done", s                                # хоча gate ще закритий для старих
+    assert not gate.is_set()
+
+
+def test_cancel_queued_job(cancel_env):
+    client, appmod, slow, gate = cancel_env
+    running = [_post(client, d) for d in (1, 2)]
+    for i in running:
+        _wait(client, i, ("running",))
+    queued = _post(client, 3)
+    assert client.get(f"/api/jobs/{queued}").json()["status"] == "queued"
+    client.post(f"/api/jobs/{queued}/cancel")
+    gate.set()
+    for i in running:
+        assert _wait(client, i, ("done", "error"))["status"] == "done"
+    assert client.get(f"/api/jobs/{queued}").json()["status"] == "cancelled"
+    assert appmod._slots._value == appmod.MAX_PARALLEL_JOBS        # слоти всі повернулись
+
+
+def test_cancel_is_idempotent_and_noop_for_finished(cancel_env):
+    client, appmod, slow, gate = cancel_env
+    slow["on"] = False
+    jid = _post(client, 1)
+    assert _wait(client, jid, ("done", "error"))["status"] == "done"
+    assert client.post(f"/api/jobs/{jid}/cancel").json() == {"ok": True, "status": "done"}
+    assert client.get(f"/api/jobs/{jid}").json()["status"] == "done"   # результат цілий
+    slow["on"] = True
+    j2 = _post(client, 2)
+    assert client.post(f"/api/jobs/{j2}/cancel").status_code == 200
+    assert client.post(f"/api/jobs/{j2}/cancel").json()["status"] in ("cancelled", "done")
+    assert client.post("/api/jobs/nope/cancel").status_code == 404
+
+
+def test_same_request_after_cancel_starts_new_job(cancel_env):
+    client, appmod, slow, gate = cancel_env
+    a = _post(client, 1)
+    _wait(client, a, ("running",))
+    client.post(f"/api/jobs/{a}/cancel")
+    slow["on"] = False
+    b = _post(client, 1)                                           # той самий запит
+    assert b != a
+    assert _wait(client, b, ("done", "error"))["status"] == "done"
+    assert client.get(f"/api/jobs/{a}").json()["status"] == "cancelled"
+    assert appmod._slots._value == appmod.MAX_PARALLEL_JOBS

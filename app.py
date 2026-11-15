@@ -8,6 +8,8 @@ API:
   GET  /api/presets                   приклади (координати зашито в коді, без довідників)
   POST /api/jobs                      {target: "RA, Dec", fov, detector} -> {job_id}
   GET  /api/jobs/{id}                 стан, прогрес, список кадрів (коли готово)
+                                      status: queued | running | done | error | cancelled
+  POST /api/jobs/{id}/cancel          скасувати (ідемпотентно) -> {ok, status}
   GET  /api/jobs/{id}/frame/{i}.png   ?mode=raw
   GET  /api/detectors                 довідка про 6 детекторів
 """
@@ -54,28 +56,64 @@ class JobRequest(BaseModel):
     detector: int = Field(..., ge=1, le=6)
 
 
+FINISHED = ("done", "error", "cancelled")
+
+
 def _purge() -> None:
+    """Викликається під _lock. Видаляє найстаріші завершені завдання."""
     if len(JOBS) <= KEEP_JOBS:
         return
-    done = sorted((j for j in JOBS.values() if j["status"] in ("done", "error")),
-                  key=lambda j: j["created"])
-    for j in done[: len(JOBS) - KEEP_JOBS]:
+    finished = sorted((j for j in JOBS.values() if j["status"] in FINISHED),
+                      key=lambda j: j["created"])
+    for j in finished[: len(JOBS) - KEEP_JOBS]:
         JOBS.pop(j["id"], None)
-        JOB_BY_KEY.pop(j["key"], None)
+        if JOB_BY_KEY.get(j["key"]) == j["id"]:      # не зачепити новіше завдання з тим самим ключем
+            JOB_BY_KEY.pop(j["key"], None)
+
+
+def _release_slot(job: dict) -> None:
+    """Звільняє слот паралельності рівно один раз (з потоку або з cancel_job)."""
+    with _lock:
+        if job["has_slot"]:
+            job["has_slot"] = False
+            _slots.release()
+
+
+def _finish(job: dict, status: str, **extra) -> None:
+    """Фінальний перехід стану. Скасоване завдання вже не змінюється."""
+    with _lock:
+        if job["status"] == "cancelled":
+            return
+        job["status"] = status
+        job.update(extra)
 
 
 def _run(job: dict) -> None:
     def progress(stage: str, done: int, total: int) -> None:
+        if job["cancel"]:
+            raise core.Cancelled()
         job["stage"], job["done"], job["total"] = stage, done, total
 
-    with _slots:
+    # Чекаємо слот, але не після скасування (скасована черга не займає слотів).
+    while not _slots.acquire(timeout=0.2):
+        if job["cancel"]:
+            return
+    with _lock:
+        if job["cancel"]:
+            _slots.release()
+            return
+        job["has_slot"] = True
         job["status"] = "running"
-        try:
-            job["stack"] = core.run_pipeline(job["req"]["target"], job["req"]["fov"],
-                                             job["req"]["detector"], progress)
-            job["status"] = "done"
-        except Exception as e:  # noqa: BLE001
-            job["status"], job["error"] = "error", f"{type(e).__name__}: {e}"
+    try:
+        stack = core.run_pipeline(job["req"]["target"], job["req"]["fov"],
+                                  job["req"]["detector"], progress)
+        _finish(job, "done", stack=stack)
+    except core.Cancelled:
+        _finish(job, "cancelled")
+    except Exception as e:  # noqa: BLE001
+        _finish(job, "error", error=f"{type(e).__name__}: {e}")
+    finally:
+        _release_slot(job)
 
 
 @app.post("/api/jobs")
@@ -94,12 +132,29 @@ def create_job(req: JobRequest):
         job = {"id": jid, "key": key, "req": {"target": norm, "fov": req.fov, "detector": req.detector},
                "status": "queued",
                "stage": "queued", "done": 0, "total": 0, "created": time.time(),
-               "stack": None, "error": None}
+               "stack": None, "error": None, "cancel": False, "has_slot": False}
         JOBS[jid] = job
         JOB_BY_KEY[key] = jid
         _purge()
     threading.Thread(target=_run, args=(job,), daemon=True).start()
     return {"job_id": jid}
+
+
+@app.post("/api/jobs/{job_id}/cancel")
+def cancel_job(job_id: str):
+    """Скасовує завдання. Слот звільняється одразу, фоновий потік зупиниться на
+    найближчому кроці конвеєра. Для вже завершеного завдання нічого не робить."""
+    job = JOBS.get(job_id)
+    if not job:
+        raise HTTPException(404, "Невідоме завдання")
+    with _lock:
+        if job["status"] in FINISHED:
+            return {"ok": True, "status": job["status"]}
+        job["cancel"] = True
+        job["status"] = "cancelled"
+        job["stage"] = "cancelled"
+    _release_slot(job)
+    return {"ok": True, "status": "cancelled"}
 
 
 @app.get("/api/jobs/{job_id}")

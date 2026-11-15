@@ -1,99 +1,94 @@
 ## The 2026 NASA Space Apps Challenge 
 # Planet X and SPHEREx
 
-PlanetKwa is an interactive web application that allows users to explore, visualize, and compare SPHEREx infrared observations of astronomical objects across different observation dates. It brings astronomical data retrieval, image processing, temporal comparison, and change analysis together in one interface.
+**Explore and compare real astronomical observations from NASA's SPHEREx space telescope to investigate how objects change over time.**
 
 ## Overview
 
-Repeated observations of the same region of the sky can reveal changes in astronomical objects, including variations in brightness and apparent position. PlanetKwa makes these observations easier to explore by providing tools for retrieving and comparing images from different points in time.
+PlanetKwa is an interactive web application that allows users to explore SPHEREx observations of astronomical regions and compare images captured at different times and spectral channels.
 
-Users can enter sky coordinates, browse its available observations, switch between observation dates, and visualize differences between images.
+The application provides tools for visualizing observations, identifying potential changes, and documenting findings in downloadable PDF reports.
 
 ## Key Features
 
-### Astronomical Object Search
-- Search by celestial coordinates (Right Ascension and Declination), in degrees or sexagesimal.
-- Ready-made examples are built in (coordinates are hard-coded; no name-resolver/catalog lookups are made).
-- Retrieve available SPHEREx observations for the selected sky region.
-- Browse observations from different dates.
+### 1. Astronomical Search
+- Search for astronomical regions using celestial coordinates (RA/Dec).
+- Retrieve available SPHEREx observations for the selected coordinates.
 
-### Image Visualization
-- View processed SPHEREx observation images.
-- Switch between available observation dates.
-- Explore observations from different SPHEREx spectral channels.
-- Access observation metadata, including dates and coordinates.
+### 2. Image Visualization
+- Display retrieved SPHEREx observation images.
+- Switch between different observation dates.
+- Select and explore different spectral channels.
+- View basic observation metadata.
 
-### Temporal Image Comparison
+### 3. Temporal Image Comparison
+- Compare two images captured at different observation times.
+- Use **Blink Animation** to switch automatically between observations and identify visual differences.
+- Use an interactive **Slider** to compare two images by moving between them.
 
-PlanetKwa provides several ways to compare astronomical observations:
+### 4. Change Inspection
+- Inspect regions where potential changes are visible.
+- Display coordinates and additional information about identified changes.
+- Use observation metadata to support further investigation.
 
-- **Side-by-Side Comparison** — display two observations next to each other.
-- **Slider Comparison** — interactively move between two images to inspect differences.
-- **Blink Animation** — rapidly alternate between observations to make changes easier to notice.
-- **Difference Map** — visualize pixel-level differences between observations to highlight potential changes.
+### 5. PDF Report Export
+PlanetKwa allows users to document and export their observations as PDF reports.
 
-### Change Analysis
-- Highlight potential brightness variations and positional changes.
-- Display relevant observation dates and coordinates.
-- Provide information about detected differences to support further investigation.
+The report creation process includes:
+- Selecting a specific region of an observation where a potential change has been identified.
+- Automatically populating technical information, including:
+  - Celestial coordinates (RA/Dec).
+  - Field of view (FoV).
+  - Detector number.
+  - Total number of frames.
+  - Selected frame number.
+- Adding personal observations and descriptions through a report form.
+- Generating and downloading the completed report as a PDF file.
+
+This feature helps users preserve their findings and share documented observations for further investigation.
 
 ## How It Works
 
-PlanetKwa follows a straightforward workflow:
+The application follows a straightforward workflow:
 
-1. **Search** – enter RA/Dec coordinates (or pick a built-in example).
-2. **Retrieve** – find available SPHEREx observations covering the selected sky region.
-3. **Visualize** – load and display observation images with their associated metadata.
-4. **Compare** – select observations from different dates and use the available comparison modes.
-5. **Analyze** – inspect visual differences and explore potential changes in the astronomical object.
+1. **Search** — Select an astronomical object from the available list. Its celestial coordinates (RA/Dec) are populated automatically.
+2. **Observe** — Browse retrieved SPHEREx images, observation dates, spectral channels, and metadata.
+3. **Compare** — Compare observations using image comparison, Blink Animation, or the interactive Slider.
+4. **Analyze** — Inspect potential changes and review their coordinates and related information.
+5. **Export** — Select a region, add observations, and download a PDF report.
 
 ## Data Processing
 
-The application processes real SPHEREx observational data to make images suitable for temporal comparison.
+PlanetKwa processes real SPHEREx observational data to prepare images for visualization and comparison.
 
-The processing pipeline includes:
-
-- Querying the SPHEREx archive through the IRSA TAP service.
-- Retrieving FITS cutouts for the selected sky region.
-- Removing zodiacal light contribution and handling flagged pixels.
-- Aligning observations to a common celestial coordinate grid using World Coordinate System (WCS).
-- Normalizing image data for consistent visualization.
-- Generating image frames and difference maps.
-- Caching processed data to reduce repeated downloads and processing time.
-
-## Test Objects
-
-The application supports exploration of astronomical objects selected to demonstrate different types of temporal behavior:
-
-- **Barnard's Star** (position moved by hand to epoch ~2026.0)
-- **Epsilon Indi B**
-- **WISE 0855**
-- **RW Aurigae**
-- **R Draconis**
-
-These objects provide examples of phenomena such as proper motion and brightness variability.
+The processing pipeline includes retrieving observation data, downloading FITS images, cleaning image data, aligning observations to a common coordinate grid, and preparing image frames for visualization.
 
 ## Technology Stack
 
-**Core data processing and astronomy:**
-- Python
-- NumPy
-- Astropy
-- Astroquery
-- Reproject
-- FITS
-- Pillow
+- **Python** — Core application logic and data processing.
+- **NumPy** — Numerical operations and image data processing.
+- **Astropy** — Astronomical coordinates, FITS handling, and World Coordinate System (WCS).
+- **Astroquery** — Access to astronomical databases and services.
+- **Reproject** — Aligning astronomical images to a common coordinate system.
+- **Pillow** — Image processing and rendering.
+- **NASA SPHEREx / IRSA** — Source of observational data.
 
-**Astronomical data services:**
-- NASA SPHEREx
-- IRSA (Infrared Processing and Analysis Center)
+## Test Objects
+
+The project includes astronomical targets associated with different types of observable changes:
+
+- Barnard's Star
+- Epsilon Indi B
+- WISE 0855
+- RW Aurigae
+- R Draconis
+
+These targets provide examples for exploring phenomena such as proper motion and brightness variability.
 
 ## Project Scope
 
-PlanetKwa focuses on making real SPHEREx observations accessible through an interactive visualization and comparison workflow.
+PlanetKwa is an exploratory tool for visualizing and comparing astronomical observations. Differences between images may indicate changes that deserve further investigation, but visual differences alone do not confirm new astronomical discoveries.
 
-The application is designed for exploring potential changes in astronomical observations. Visual differences are intended to support further investigation and should not be interpreted as automatic confirmation of new planets or other astronomical discoveries.
 
----
 
-**PlanetKwa — Making the changing universe easier to explore.**
+**PlanetKwa – Making the changing universe easier to explore.**
