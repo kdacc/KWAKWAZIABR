@@ -20,6 +20,7 @@ import logging
 import math
 import os
 import re
+import threading
 import time
 from dataclasses import dataclass
 from typing import Callable, Optional
@@ -47,6 +48,10 @@ DETECTOR_BANDS = {
     1: (0.75, 1.09), 2: (1.10, 1.62), 3: (1.63, 2.41),
     4: (2.42, 3.82), 5: (3.83, 4.41), 6: (4.42, 5.00),
 }
+
+class Cancelled(Exception):
+    """Користувач скасував завдання"""
+
 
 ProgressCb = Callable[[str, int, int], None]
 
@@ -209,16 +214,33 @@ def load_cutout(url: str, coord, time_value: float, retries: int = 2) -> Optiona
 
 def fetch_frames(urls_times: list[tuple[str, float]], coord,
                  progress: ProgressCb = _noop) -> list[Frame]:
-    """Паралельне завантаження; порядок за часом зберігається."""
+    """Паралельне завантаження; порядок за часом зберігається.
+
+    Якщо progress кидає виняток (наприклад Cancelled), нові завантаження не стартують,
+    а функція одразу виходить, НЕ чекаючи кадрів, що вже тягнуться з мережі.
+    """
     total = len(urls_times)
     done = 0
     results: list[Optional[Frame]] = [None] * total
-    with cf.ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
-        futs = {ex.submit(load_cutout, u, coord, t): i for i, (u, t) in enumerate(urls_times)}
+    stop = threading.Event()
+
+    def task(u, t):
+        if stop.is_set():
+            return None
+        return load_cutout(u, coord, t)
+
+    ex = cf.ThreadPoolExecutor(max_workers=MAX_WORKERS)
+    try:
+        futs = {ex.submit(task, u, t): i for i, (u, t) in enumerate(urls_times)}
         for fut in cf.as_completed(futs):
             results[futs[fut]] = fut.result()
             done += 1
             progress("download", done, total)
+    except BaseException:
+        stop.set()
+        raise
+    finally:
+        ex.shutdown(wait=False, cancel_futures=True)
     frames = [f for f in results if f is not None]
     frames.sort(key=lambda f: f.time)
     return frames
