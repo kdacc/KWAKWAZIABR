@@ -1,18 +1,3 @@
-"""
-SPHEREx Time-Lapse web backend (FastAPI).
-
-Run:   uvicorn app:app --reload
-Open:  http://127.0.0.1:8000/
-
-API:
-  GET  /api/presets                   examples (coordinates are hard-coded, no catalog lookups)
-  POST /api/jobs                      {target: "RA, Dec", fov, detector} -> {job_id}
-  GET  /api/jobs/{id}                 state, progress, frame list (when done)
-                                      status: queued | running | done | error | cancelled
-  POST /api/jobs/{id}/cancel          cancel (idempotent) -> {ok, status}
-  GET  /api/jobs/{id}/frame/{i}.png   ?mode=raw
-  GET  /api/detectors                 info about the 6 detectors
-"""
 from __future__ import annotations
 
 import os
@@ -39,8 +24,7 @@ JOBS: dict[str, dict] = {}
 JOB_BY_KEY: dict[str, str] = {}
 KEEP_JOBS = 30
 
-# Hard-coded examples. ICRS coordinates in degrees; no catalog lookups (SIMBAD etc.).
-# For fast-moving objects the position was moved by hand to epoch ~2026.0, because proper motion is not applied.
+
 PRESETS = [
     {"name": "WISE 0855", "ra": 133.79513, "dec": -7.24515, "fov": 0.1},
     {"name": "Barnard's Star", "ra": 269.44626, "dec": 4.76823, "fov": 0.1},
@@ -61,19 +45,17 @@ FINISHED = ("done", "error", "cancelled")
 
 
 def _purge() -> None:
-    """Called under _lock. Removes the oldest finished jobs."""
     if len(JOBS) <= KEEP_JOBS:
         return
     finished = sorted((j for j in JOBS.values() if j["status"] in FINISHED),
                       key=lambda j: j["created"])
     for j in finished[: len(JOBS) - KEEP_JOBS]:
         JOBS.pop(j["id"], None)
-        if JOB_BY_KEY.get(j["key"]) == j["id"]:      # do not touch a newer job with the same key
+        if JOB_BY_KEY.get(j["key"]) == j["id"]:
             JOB_BY_KEY.pop(j["key"], None)
 
 
 def _release_slot(job: dict) -> None:
-    """Releases the concurrency slot exactly once (from the worker thread or from cancel_job)."""
     with _lock:
         if job["has_slot"]:
             job["has_slot"] = False
@@ -81,7 +63,6 @@ def _release_slot(job: dict) -> None:
 
 
 def _finish(job: dict, status: str, **extra) -> None:
-    """Final state transition. A cancelled job no longer changes."""
     with _lock:
         if job["status"] == "cancelled":
             return
@@ -95,7 +76,7 @@ def _run(job: dict) -> None:
             raise core.Cancelled()
         job["stage"], job["done"], job["total"] = stage, done, total
 
-    # Wait for a slot, but not after cancellation (a cancelled queue entry holds no slots).
+
     while not _slots.acquire(timeout=0.2):
         if job["cancel"]:
             return
@@ -111,7 +92,7 @@ def _run(job: dict) -> None:
         _finish(job, "done", stack=stack)
     except core.Cancelled:
         _finish(job, "cancelled")
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         _finish(job, "error", error=f"{type(e).__name__}: {e}")
     finally:
         _release_slot(job)
@@ -119,7 +100,7 @@ def _run(job: dict) -> None:
 
 @app.post("/api/jobs")
 def create_job(req: JobRequest):
-    # Coordinates only, no network. An object name -> 422 right away, not a failure in the background thread.
+
     try:
         norm = core.normalize_target(req.target)
     except ValueError as e:
@@ -143,8 +124,6 @@ def create_job(req: JobRequest):
 
 @app.post("/api/jobs/{job_id}/cancel")
 def cancel_job(job_id: str):
-    """Cancels a job. The slot is released immediately; the background thread stops at
-    the nearest pipeline step. Does nothing for an already finished job."""
     job = JOBS.get(job_id)
     if not job:
         raise HTTPException(404, "Unknown job")
@@ -200,15 +179,12 @@ def index():
     return FileResponse(os.path.join(HERE, "index.html"))
 
 
-# frog images for the Neon-lab 3D/CSS scene (index.html loads them as kwakwaziabry/<name>.png)
 _FROGS_DIR = os.path.join(HERE, "kwakwaziabry")
 if os.path.isdir(_FROGS_DIR):
     app.mount("/kwakwaziabry", StaticFiles(directory=_FROGS_DIR), name="kwakwaziabry")
 
 
-# --- PDF report ------------------------------------------------------------
 class ReportRegion(BaseModel):
-    """Selected area as fractions of the frame size (0..1), origin at the top-left corner."""
     x: float = Field(..., ge=0, le=1)
     y: float = Field(..., ge=0, le=1)
     w: float = Field(..., gt=0, le=1)

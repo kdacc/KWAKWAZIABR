@@ -1,13 +1,3 @@
-"""
-PDF report for a single SPHEREx frame (reportlab).
-
-The report contains: a frame snapshot with the selected area outlined in red, the observation parameters
-(target, RA/Dec, detector, field of view, number of frames), the frame number and date, and the user's notes.
-
-The parameters are taken from the pipeline result (`Stack.describe()`), not from the client,
-so they cannot be changed in the form. The client only sends the frame number, notes,
-the area and the PNG snapshot.
-"""
 from __future__ import annotations
 
 import base64
@@ -29,7 +19,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import Image as PdfImage
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
-# Standard PDF fonts (Helvetica) lack some glyphs used here (−, ′, ″, μ, ×), so DejaVu from the fonts/ folder is used.
+
 FONT_DIR = Path(__file__).resolve().parent / "fonts"
 FONT_REGULAR, FONT_BOLD = "ReportSans", "ReportSans-Bold"
 FONT_FILES = {FONT_REGULAR: "DejaVuSans.ttf", FONT_BOLD: "DejaVuSans-Bold.ttf"}
@@ -63,17 +53,14 @@ class ReportData:
     band_um: tuple[float, float]
     fov_deg: float
     frame_count: int
-    frame_number: int                      # starts at 1
+    frame_number: int
     frame_date: str
     wavelength_um: Optional[float]
     grid_px: Optional[tuple[int, int]]
-    region: Optional[dict]                 # fractions of the frame: x, y, w, h in [0, 1]
+    region: Optional[dict]
     notes: str
 
 
-# ---------------------------------------------------------------------------
-# Coordinate formatting
-# ---------------------------------------------------------------------------
 def format_ra_hms(ra_deg: float) -> str:
     hundredths = round(ra_deg / 15.0 * 3600 * 100) % (24 * 3600 * 100)
     hours, rest = divmod(hundredths, 3600 * 100)
@@ -89,11 +76,7 @@ def format_dec_dms(dec_deg: float) -> str:
     return f"{sign}{degrees:02d}° {minutes:02d}′ {rest / 10:04.1f}″"
 
 
-# ---------------------------------------------------------------------------
-# Input data
-# ---------------------------------------------------------------------------
 def decode_area_image(encoded: str) -> AreaImage:
-    """PNG in base64 (or a data URL) -> a validated image. ValueError if it is not suitable."""
     payload = encoded.split(",", 1)[1] if encoded.startswith("data:") else encoded
     try:
         raw = base64.b64decode(payload, validate=True)
@@ -121,7 +104,6 @@ def _region_in_pixels(region: dict, grid_px: tuple[int, int]) -> tuple[int, int,
 
 def collect_report_data(description: dict, frame_number: int, notes: str,
                         region: Optional[dict]) -> ReportData:
-    """Collects the report data from `Stack.describe()`; ValueError for an invalid frame number."""
     frames = description["frames"]
     if not 1 <= frame_number <= len(frames):
         raise ValueError(f"The frame number must be between 1 and {len(frames)}.")
@@ -141,9 +123,6 @@ def collect_report_data(description: dict, frame_number: int, notes: str,
     )
 
 
-# ---------------------------------------------------------------------------
-# Building the PDF
-# ---------------------------------------------------------------------------
 def _register_fonts() -> None:
     if FONT_REGULAR in pdfmetrics.getRegisteredFontNames():
         return
@@ -247,11 +226,6 @@ def build_report_pdf(data: ReportData, area: Optional[AreaImage]) -> bytes:
 
 def make_report_pdf(description: dict, frame_number: int, notes: str = "",
                     region: Optional[dict] = None, area_image: Optional[str] = None) -> bytes:
-    """
-    description -- the result of `Stack.describe()`; frame_number -- starts at 1;
-    region -- {x, y, w, h} as fractions of the frame; area_image -- PNG in base64 / data URL.
-    ValueError -- invalid data from the client.
-    """
     data = collect_report_data(description, frame_number, notes, region)
     area = decode_area_image(area_image) if area_image else None
     return build_report_pdf(data, area)
