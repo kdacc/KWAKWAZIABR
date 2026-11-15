@@ -99,11 +99,11 @@
   .tick.active { background:var(--a1); height:10px; bottom:-2px; box-shadow:0 0 6px var(--a1); }
   .time-labels { display:flex; justify-content:space-between; font-size:11px; color:var(--dim); margin-top:4px; }
   
-  .coord-row { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
-  .coord-row label { flex-shrink:0; margin:0; width:30px; font-weight:bold; }
-  .coord-row input { flex:1; }
-  .coord-row select { width:auto; padding:4px 8px; font-size:12px; border:1px solid var(--line); background:#1b2230; cursor:pointer; }
-  .static-unit { font-size:12px; color:var(--dim); padding:4px 8px; flex-shrink:0; background:#141923; border:1px dashed var(--line); border-radius:6px; width:110px; text-align:center; }
+  .coord-row { display:flex; gap:8px; align-items:center; margin-top:10px; }
+  .coord-row label { flex:none; width:30px; margin:0; font-weight:700; color:var(--text); }
+  .coord-row input { flex:1; min-width:0; }
+  .coord-row select, .static-unit { flex:none; width:122px; padding:9px 8px; font-size:12px; text-align:center; border-radius:8px; }
+  .static-unit { color:var(--dim); background:rgba(5,8,22,.55); border:1px dashed var(--line); }
 
   .wide-btn { width:100%; margin-top:8px; }
   #region-canvas { position:absolute; inset:0; width:100%; height:100%; z-index:10; pointer-events:none; }
@@ -185,6 +185,19 @@
     .band { display:flex; flex-direction:column; }
   }
   #crew[hidden] ~ .dock { position:static; width:auto; margin-top:12px; }
+
+  /* --- Неон-лаб як випадаюче вікно, звіт — помітна кнопка --- */
+  .dock { width:230px; }
+  .dock .row2 { margin-top:7px; }
+  .dock .themes { margin-top:4px; }
+  #btn-report { width:100%; margin-top:10px; padding:12px 14px; font-size:15px; font-weight:700; color:#fff; border:1px solid transparent;
+    background:linear-gradient(90deg,var(--a3),var(--a2)); text-shadow:0 1px 2px rgba(0,0,0,.45); box-shadow:0 0 var(--g1) var(--a3); }
+  #btn-report::before { content:"📄 "; }
+  #btn-report:not(:disabled) { animation:reportPulse 2.4s ease-in-out infinite; }
+  #btn-report:hover:not(:disabled) { transform:translateY(-1px); box-shadow:0 0 var(--g2) var(--a3), 0 0 calc(40px*var(--glow)) var(--a2); }
+  #btn-report:disabled { background:rgba(40,24,90,.6); color:var(--dim); border-color:var(--line); box-shadow:none; text-shadow:none; }
+  @keyframes reportPulse { 50% { box-shadow:0 0 var(--g2) var(--a3), 0 0 calc(40px*var(--glow)) var(--a2); } }
+  @media (prefers-reduced-motion:reduce) { #btn-report { animation:none !important; } }
 </style>
 </head>
 <body>
@@ -196,25 +209,26 @@
   <p>Послідовні знімки ділянки неба: об'єкти, що рухаються, зсуваються між кадрами.</p>
 </header>
 <main>
-  <section class="panel">
-    <label>Координати об'єкта</label>
-    
-    <div class="coord-row">
-      <label for="target-ra">RA</label>
-      <input id="target-ra" type="text" placeholder="08h55m10.831s">
-      <select id="coord-format">
-        <option value="hours" selected>Години (hms)</option>
-        <option value="deg">Градуси (.)</option>
-      </select>
-    </div>
+  <section class="panel" id="sidebar">
+    <div id="settings-content">
+      <label>Координати об'єкта</label>
 
-    <div class="coord-row">
-      <label for="target-dec">Dec</label>
-      <input id="target-dec" type="text" placeholder="-07d14m42.53s">
-      <div id="dec-unit" class="static-unit">Градуси (dms)</div>
-    </div>
+      <div class="coord-row">
+        <label for="target-ra">RA</label>
+        <input id="target-ra" type="text" placeholder="08h55m10.831s">
+        <select id="coord-format">
+          <option value="hours" selected>Години (hms)</option>
+          <option value="deg">Градуси (.)</option>
+        </select>
+      </div>
 
-    <div class="presets" id="presets"></div>
+      <div class="coord-row">
+        <label for="target-dec">Dec</label>
+        <input id="target-dec" type="text" placeholder="-07d14m42.53s">
+        <div id="dec-unit" class="static-unit">Градуси (dms)</div>
+      </div>
+
+      <div class="presets" id="presets"></div>
 
       <label for="fov">Поле зору, градуси (0.01–0.3)</label>
       <input id="fov" type="number" min="0.01" max="0.3" step="0.01" value="0.1">
@@ -222,9 +236,7 @@
       <label for="det">Детектор</label>
       <select id="det"></select>
 
-    <label>Режим показу</label>
-    <div class="modes">
-      <label><input type="radio" name="mode" value="raw" checked> Усе небо</label>
+      <input type="radio" name="mode" value="raw" checked hidden>
 
       <button class="primary" id="go">Завантажити кадри</button>
       <button class="ctrl-btn wide-btn" id="btn-report" disabled>Make a Report</button>
@@ -232,7 +244,6 @@
       <div class="bar" id="bar"><div></div></div>
       <div class="small" id="status"></div>
       <div class="notes" id="notes"></div>
-
     </div>
 
     <div id="report-panel" hidden>
@@ -271,7 +282,7 @@
     <div id="viewer">
       <div id="msg">Виберіть детектор і натисніть «Завантажити кадри».</div>
       <img id="img" alt="" hidden>
-      <div id="tint"></div><div id="scan"></div>
+      <div id="tint"></div>
       <div id="hud" hidden></div>
       <div id="select-hint" hidden></div>
     </div>
@@ -286,28 +297,25 @@
         <div class="ticks" id="ticks"></div>
         <div class="time-labels" id="time-labels"></div>
       </div>
-      <button id="btn-cut" class="ctrl-btn" title="Режим обрізки">Cut</button>
-      <button id="btn-download" class="ctrl-btn primary" title="Завантажити вибрані кадри">⬇ Вибране</button>
     </div>
   </section>
 </main>
 <section class="band">
   <div id="crew" hidden><div class="crew-hint">Рухай курсор — жаби дивляться за ним · потягни, щоб розвернути · клікни по жабі — вона підстрибне</div></div>
-  <aside class="dock dock-left"><details class="dock-card" open><summary>Неон-лаб</summary>
-      <div class="fx">
-        <div class="themes" id="themes">
-          <button class="swatch on" data-t="synth" title="Synthwave"></button>
-          <button class="swatch" data-t="ultra" title="Ultraviolet"></button>
-          <button class="swatch" data-t="aurora" title="Aurora"></button>
-        </div>
-        <div class="row2"><span class="small">Сяйво</span><input type="range" id="glow" min="0" max="2" step="0.1" value="1"></div>
-        <div class="row2"><label><input type="checkbox" id="fx-tint"> Неонове підфарбування кадрів</label></div>
-        <div class="row2"><label><input type="checkbox" id="fx-scan"> Скан-лінії</label></div>
-        <div class="row2"><label><input type="checkbox" id="fx-stars" checked> Рухомі зорі</label></div>
-        <div class="row2"><label><input type="checkbox" id="fx-frogs"> Літаючі жаби 🐸</label></div>
-        <button class="ctrl-btn wide-btn" id="btn-swarm" type="button">Ква! Випустити зграю 🐸</button>
+  <aside class="dock dock-left"><div class="dock-card"><h4>Неон-лаб</h4>
+    <div class="fx">
+      <div class="themes" id="themes">
+        <button class="swatch on" data-t="synth" title="Synthwave"></button>
+        <button class="swatch" data-t="ultra" title="Ultraviolet"></button>
+        <button class="swatch" data-t="aurora" title="Aurora"></button>
       </div>
-  </details></aside>
+      <div class="row2"><span class="small">Сяйво</span><input type="range" id="glow" min="0" max="2" step="0.1" value="1"></div>
+      <div class="row2"><label><input type="checkbox" id="fx-tint"> Неонове підфарбування кадрів</label></div>
+      <div class="row2"><label><input type="checkbox" id="fx-stars" checked> Рухомі зорі</label></div>
+      <div class="row2"><label><input type="checkbox" id="fx-frogs"> Літаючі жаби 🐸</label></div>
+      <button class="ctrl-btn wide-btn" id="btn-swarm" type="button">Ква! Випустити зграю 🐸</button>
+    </div>
+  </div></aside>
   <aside class="dock dock-right"><div class="dock-card"><h4>Спостереження</h4><div class="small" id="info"></div></div></aside>
 </section>
 
@@ -328,7 +336,6 @@ $("themes").onclick = e => {
 };
 $("glow").oninput = e => document.documentElement.style.setProperty("--glow", e.target.value);
 $("fx-tint").onchange = e => $("viewer").classList.toggle("tinted", e.target.checked);
-$("fx-scan").onchange = e => $("viewer").classList.toggle("scan", e.target.checked);
 
 const sky = $("stars"), sctx = sky.getContext("2d");
 let stars = [], mx = 0, my = 0, starsOn = true, shoot = null;
@@ -692,28 +699,6 @@ function updateActiveTick(i) {
   $("ticks").querySelectorAll(".tick").forEach((t, idx) => { t.className = "tick" + (idx === i ? " active" : ""); });
 }
 
-$("btn-cut").onclick = () => {
-  if (!frames.length) return;
-  cutMode = !cutMode;
-  $("btn-cut").classList.toggle("active", cutMode);
-  if (cutMode) { selStart = cur; selEnd = cur; renderSelection(); }
-  else { selStart = null; selEnd = null; renderSelection(); }
-};
-
-$("btn-download").onclick = async () => {
-  if (!frames.length || selStart === null || selEnd === null) return;
-  const btn = $("btn-download"); btn.disabled = true; btn.textContent = "Завантаження…";
-  try {
-    for (let i = selStart; i <= selEnd; i++) {
-      const blob = await (await fetch(url(i, mode))).blob();
-      const f = frames[i];
-      const stamp = f.utc ? f.utc.replace(/[^0-9]/g, "") : "MJD" + f.time.toFixed(3).replace(".", "");
-      downloadBlob(blob, `SPHEREx_${stamp}_${String(i).padStart(3,"0")}_${mode}.png`);
-      await new Promise(r => setTimeout(r, 150));
-    }
-  } finally { btn.disabled = false; btn.textContent = "⬇ Вибране"; }
-};
-
 function downloadBlob(blob, filename) {
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
@@ -726,7 +711,7 @@ function downloadBlob(blob, filename) {
 function ready(res) {
   $("go").disabled = false; $("bar").style.display = "none"; $("status").textContent = `Кадрів: ${res.count}`;
   frames = res.frames; lastResult = res;
-  selStart = null; selEnd = null; cutMode = false; $("btn-cut").classList.remove("active");
+  selStart = null; selEnd = null; cutMode = false;
   mode = document.querySelector('input[name=mode]:checked').value;
   const n = res.meta.notes || []; $("notes").textContent = n.join(" ");
   $("slider").max = frames.length - 1; $("slider").disabled = false; $("play").disabled = false;
