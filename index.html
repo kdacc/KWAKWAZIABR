@@ -175,7 +175,7 @@
   .scrub { flex:1; min-width:140px; }
   @media (max-width:560px) { .scrub { order:9; flex-basis:100%; } }
   .band { position:relative; z-index:1; max-width:1240px; margin:0 auto; padding:0 20px 36px; }
-  #crew { position:relative; height:clamp(400px,46vw,580px); border-radius:18px; overflow:hidden; border:1px solid var(--line);
+  #crew { position:relative; height:clamp(480px,48vw,640px); border-radius:18px; overflow:hidden; border:1px solid var(--line);
     background:linear-gradient(180deg,rgba(5,3,25,.5),rgba(5,3,25,.1) 45%,rgba(70,20,130,.4)), var(--back) center/cover;
     box-shadow:0 0 var(--g2) rgba(157,77,255,.25), inset 0 0 60px rgba(5,3,25,.6); }
   #crew canvas { display:block; width:100%; height:100%; touch-action:pan-y; cursor:grab; }
@@ -223,6 +223,41 @@
   #select-cancel { position:absolute; top:10px; right:10px; z-index:25; font-size:12px; padding:5px 12px; border-radius:20px;
     background:rgba(5,3,25,.85); border-color:var(--a1); box-shadow:0 0 var(--g1) var(--a1); }
   #report-panel.selecting { display:none; }
+
+  /* ---- onboarding (frogs + questions) ---- */
+  #crew { --onb-list:250px; --onb-bw:min(36%,400px); }
+  .onb-ph { position:absolute; pointer-events:none; visibility:hidden; }
+  #onb-idle { left:0; top:0; bottom:0; right:calc(var(--onb-list) + 32px); }
+  #onb-block { left:24px; top:52px; bottom:84px; width:var(--onb-bw); }
+  #onb-name { position:absolute; left:24px; bottom:28px; width:var(--onb-bw); text-align:center; z-index:3; pointer-events:none;
+    font:700 24px system-ui,sans-serif; letter-spacing:.04em; color:#fff; text-shadow:0 0 6px var(--a1), 0 0 var(--g1) var(--a1), 0 0 var(--g2) var(--a2); animation:onbIn .5s ease-out; }
+  #onb-list, #onb-answer { position:absolute; z-index:3; background:var(--panel); backdrop-filter:blur(12px); border:1px solid var(--line); border-radius:12px;
+    box-shadow:0 0 var(--g2) rgba(157,77,255,.2); scrollbar-width:thin; overflow:auto; }
+  #onb-list { right:16px; top:40px; bottom:16px; width:var(--onb-list); padding:12px; }
+  #onb-list h4 { margin:0 0 4px; font:700 14px system-ui,sans-serif; color:var(--a1); text-shadow:0 0 8px var(--a1); }
+  .onb-q { display:block; width:100%; margin-top:6px; text-align:left; font-size:13.5px; padding:8px 10px; line-height:1.3; }
+  .onb-q.on { border-color:var(--a1); box-shadow:0 0 var(--g1) var(--a1); background:linear-gradient(90deg,rgba(255,46,151,.28),rgba(157,77,255,.28)); color:#fff; }
+  #onb-answer { left:calc(24px + var(--onb-bw) + 24px); right:calc(var(--onb-list) + 32px); top:52px; bottom:20px; padding:16px 20px; animation:onbIn .45s ease-out; }
+  #onb-answer h3 { margin:6px 0 12px; font:700 20px system-ui,sans-serif; color:#fff; text-shadow:0 0 6px var(--a1), 0 0 var(--g1) var(--a2); }
+  #onb-body p { margin:0 0 10px; font-size:14.5px; line-height:1.55; }
+  #onb-body p.em { color:var(--a1); font-weight:600; text-shadow:0 0 10px rgba(255,46,151,.35); }
+  #onb-body ul { margin:0 0 12px; padding-left:20px; font-size:14.5px; line-height:1.5; }
+  #onb-body li { margin-bottom:5px; }
+  #onb-body li b { color:var(--a1); font-weight:600; }
+  #onb-body .primary { width:auto; padding:10px 22px; margin-top:4px; }
+  #onb-back { font-size:12px; padding:4px 10px; border-radius:20px; color:var(--dim); }
+  #crew.focused .crew-hint { opacity:0; }
+  @keyframes onbIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  @media (prefers-reduced-motion:reduce) { #onb-name, #onb-answer { animation:none; } }
+  @media (max-width:900px) {
+    #crew { height:900px; --onb-bw:300px; }
+    #onb-idle { right:0; bottom:auto; height:380px; }
+    #onb-block { left:calc(50% - 150px); top:40px; bottom:auto; height:230px; }
+    #onb-name { left:calc(50% - 150px); bottom:auto; top:276px; }
+    #onb-list { left:12px; right:12px; top:396px; bottom:12px; width:auto; }
+    #onb-answer { left:12px; right:12px; top:330px; bottom:12px; }
+    #crew.focused #onb-list { display:none; }
+  }
 </style>
 </head>
 <body>
@@ -352,7 +387,18 @@
   </section>
 </main>
 <section class="band">
-  <div id="crew" hidden><div class="crew-hint">Move the cursor — the frogs watch it · drag to turn the scene · click a frog — it jumps</div></div>
+  <div id="crew" hidden>
+    <div class="crew-hint">Move the cursor — the frogs watch it · drag to turn the scene · click a frog — it jumps</div>
+    <div id="onb-idle" class="onb-ph"></div>
+    <div id="onb-block" class="onb-ph"></div>
+    <div id="onb-name" hidden></div>
+    <article id="onb-answer" hidden>
+      <button id="onb-back" type="button">← All questions</button>
+      <h3 id="onb-title"></h3>
+      <div id="onb-body"></div>
+    </article>
+    <nav id="onb-list" aria-label="Onboarding questions"><h4>Onboarding</h4><div id="onb-qs"></div></nav>
+  </div>
 </section>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -455,6 +501,109 @@ function buildGalaxies() {
 }
 buildGalaxies();
 
+const ONB_QA = [
+  {q:"What is NASA?", a:[
+    "NASA (National Aeronautics and Space Administration) is the United States government agency responsible for the nation's civilian space program and aerospace research.",
+    "From exploring distant planets to studying stars and galaxies, NASA develops technologies and operates missions that help humanity better understand the universe.",
+    "One of these missions is SPHEREx – a space telescope designed to map the entire sky in infrared light."]},
+  {q:"What is SPHEREx?", a:[
+    "SPHEREx (Spectro-Photometer for the History of the Universe, Epoch of Reionization and Ices Explorer) is a NASA space telescope launched on March 11, 2025.",
+    "Unlike telescopes designed to observe individual objects in extreme detail, SPHEREx is built to survey the entire sky.",
+    "It collects infrared light from stars and galaxies, creating a detailed map of the universe that helps scientists investigate how the universe began, how galaxies evolved, and where essential ingredients for life – such as water – can be found.",
+    {em:"Its mission: To explore the universe by observing the sky in 102 different infrared wavelengths."}]},
+  {q:"What is infrared light?", a:[
+    "Not all light in the universe is visible to the human eye.",
+    "Infrared light has longer wavelengths than visible light, allowing astronomers to study objects and phenomena that cannot be fully understood through ordinary visible-light observations.",
+    "SPHEREx detects near-infrared light across 102 different wavelength channels, ranging from 0.75 to 5.0 micrometers.",
+    "By studying these wavelengths, scientists can learn more about the composition of stars, galaxies, and interstellar clouds.",
+    {em:"Think of it as seeing the universe through a different set of eyes."}]},
+  {q:"How does SPHEREx observe the universe?", a:[
+    "SPHEREx collects astronomical data by scanning different regions of the sky and capturing infrared observations across multiple wavelengths.",
+    "Each observation contains valuable information, including:",
+    {ul:["<b>Observation Date</b> – when the data was collected.",
+         "<b>Spectral Channel</b> – the infrared wavelength being observed.",
+         "<b>Celestial Coordinates</b> – the exact position of the observed region in the sky.",
+         "<b>Observation Metadata</b> – technical information describing the captured data."]},
+    "By exploring different wavelengths and observations, researchers can study the properties of astronomical objects and investigate how they change over time.",
+    {em:"Every observation is another piece of the cosmic puzzle."}]},
+  {q:"What are astronomical images?", a:[
+    "Astronomical images are visual representations of scientific data collected by telescopes.",
+    "Unlike ordinary photographs, these images contain measurements of light detected from astronomical objects.",
+    "Different brightness levels represent differences in the detected signal, helping researchers study stars, galaxies, and other celestial objects.",
+    "The images displayed in PlanetKwa are processed from scientific SPHEREx data to make them easier to explore and compare."]},
+  {q:"What is PlanetKwa?", a:[
+    "Now that you know the basics of SPHEREx, it's time to explore its observations yourself.",
+    "PlanetKwa brings real SPHEREx astronomical data into one interactive workspace.",
+    "Here's what you can do:",
+    {ul:["<b>Search</b> – Find astronomical objects or explore regions using celestial coordinates.",
+         "<b>Observe</b> – Browse available observations, dates, and spectral channels.",
+         "<b>Compare</b> – Explore differences between observations using interactive comparison tools.",
+         "<b>Analyze</b> – Inspect potential changes and investigate their properties.",
+         "<b>Document</b> – Save your findings in downloadable PDF reports."]},
+    "You don't need to be an astronomer to get started.",
+    {em:"Ready to explore the changing universe?"},
+    {go:"Start Exploring"}]},
+  {q:"How do I find objects in the sky?", a:[
+    "Astronomers use a coordinate system called Right Ascension (RA) and Declination (Dec) to identify precise locations in the sky.",
+    {ul:["<b>Right Ascension (RA)</b> measures position along the celestial equator, similar to longitude on Earth.",
+         "<b>Declination (Dec)</b> measures how far an object is north or south of the celestial equator, similar to latitude."]},
+    "Together, these coordinates allow astronomers to locate specific objects and regions of the sky.",
+    "In PlanetKwa, you can use RA and Dec to search for astronomical regions and retrieve available SPHEREx observations."]},
+  {q:"Why compare observations?", a:[
+    "The universe is constantly changing. Some astronomical objects move across the sky, while others change their brightness over time.",
+    "By comparing observations captured at different moments, astronomers can investigate these changes and better understand the behavior of celestial objects.",
+    "For example:",
+    {ul:["<b>Proper Motion</b> — the apparent movement of a star across the sky over time.",
+         "<b>Brightness Variability</b> — changes in the amount of light emitted or detected from an astronomical object.",
+         "<b>Other Variations</b> — differences in the observed structure or appearance of astronomical regions."]},
+    "Comparing observations helps researchers identify potential changes that may deserve further investigation."]},
+  {q:"Is every difference a real change?", a:[
+    "Not every visible difference between two astronomical images represents a real change in the universe.",
+    "Differences can also result from image noise, background variations, instrumental effects, observation conditions, or data processing.",
+    "That is why comparing images is only the first step in scientific investigation.",
+    "PlanetKwa helps you identify and inspect potential changes, but visual differences alone cannot confirm an astronomical discovery.",
+    {em:"Explore the data, investigate the differences, and draw conclusions carefully."}]},
+  {q:"What is FITS?", a:[
+    "FITS (Flexible Image Transport System) is a standard file format widely used in astronomy to store and exchange scientific data.",
+    "Unlike regular image formats such as JPEG or PNG, FITS files can contain numerical image data, observation metadata, coordinate information, and other scientific measurements.",
+    "SPHEREx observations are distributed in FITS format, which allows researchers to process and analyze the original scientific data.",
+    "PlanetKwa processes these files and prepares their contents for interactive visualization and comparison."]},
+];
+const FROG_NAMES = ["Arina", "Diana", "Oleksus", "Polina", "Sonya", "Andrii"];   // same order as FR below
+const onb = {q: -1, frog: -1, idle: {x: 0, y: 0, w: 0, h: 0}, block: {x: 0, y: 0, w: 0, h: 0}};
+function onbMeasure() {
+  const box = $("crew"), b = box.getBoundingClientRect();
+  const rel = el => { const r = el.getBoundingClientRect(); return {x: r.left - b.left - box.clientLeft, y: r.top - b.top - box.clientTop, w: r.width, h: r.height}; };
+  onb.idle = rel($("onb-idle")); onb.block = rel($("onb-block"));
+}
+function onbSelect(i) {
+  const box = $("crew");
+  onb.q = i; onb.frog = i < 0 ? -1 : i % FROG_NAMES.length;
+  box.classList.toggle("focused", i >= 0);
+  document.querySelectorAll(".onb-q").forEach((b, k) => { b.classList.toggle("on", k === i); b.setAttribute("aria-pressed", k === i); });
+  const ans = $("onb-answer"), name = $("onb-name");
+  ans.hidden = name.hidden = i < 0;
+  if (i >= 0) {
+    $("onb-title").textContent = ONB_QA[i].q;
+    $("onb-body").innerHTML = ONB_QA[i].a.map(x =>
+      typeof x === "string" ? `<p>${x}</p>` : x.em ? `<p class="em">${x.em}</p>` : x.ul ? `<ul>${x.ul.map(l => `<li>${l}</li>`).join("")}</ul>`
+      : `<button class="primary" type="button" data-go="1">${x.go}</button>`).join("");
+    name.textContent = FROG_NAMES[onb.frog];
+    for (const el of [ans, name]) { el.style.animation = "none"; void el.offsetWidth; el.style.animation = ""; }
+    ans.scrollTop = 0;
+  }
+  onbMeasure();
+}
+$("onb-qs").innerHTML = ONB_QA.map((x, i) => `<button class="onb-q" type="button" data-i="${i}" aria-pressed="false">${x.q}</button>`).join("");
+$("onb-qs").onclick = e => { const b = e.target.closest(".onb-q"); if (b) onbSelect(+b.dataset.i === onb.q ? -1 : +b.dataset.i); };
+$("onb-back").onclick = () => onbSelect(-1);
+$("onb-body").onclick = e => {
+  if (!e.target.closest("[data-go]")) return;
+  scrollTo({top: 0, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth"});
+  setTimeout(() => $("target-ra").focus({preventScroll: true}), 400);
+};
+addEventListener("keydown", e => { if (e.key === "Escape" && onb.q >= 0 && !$("theme").open) onbSelect(-1); });
+
 (function () {
   if (!window.THREE) return;
   const T = THREE, box = $("crew"); let renderer;
@@ -486,24 +635,42 @@ buildGalaxies();
       stage.appendChild(im); els.push(o);
     });
     addEventListener("pointermove", e => { lk.x = e.clientX / innerWidth * 2 - 1; lk.y = -(e.clientY / innerHeight * 2 - 1); });
-    let sc = 1;
+    let sc = 1, stx = 0, sty = 0;
     function layout() {
       const w = box.clientWidth || 800, h = box.clientHeight || 450;
-      const dk = document.querySelector(".dock-left"), over = dk && getComputedStyle(dk).position === "absolute";
-      const free = over ? w - 2 * (dk.offsetLeft - box.offsetLeft + dk.offsetWidth + 16) : w - 32;
-      sc = Math.max(.2, Math.min(free / 1260, (h - 50) / 760, 1.2));
-      stage.style.transform = `translate(${(w - 1254 * sc) / 2}px,${h - 24 - 932 * sc}px) scale(${sc})`;
+      onbMeasure(); const id = onb.idle.w > 0 ? onb.idle : {x: 0, y: 0, w, h};
+      sc = Math.max(.2, Math.min((id.w - 32) / 1260, (id.h - 50) / 760, 1.2));
+      stx = id.x + (id.w - 1254 * sc) / 2; sty = id.y + id.h - 24 - 932 * sc;
+      stage.style.transform = `translate(${stx}px,${sty}px) scale(${sc})`;
+      glow.style.left = (id.x + id.w / 2) + "px"; glow.style.bottom = (h - id.y - id.h + 0.06 * id.h) + "px"; glow.style.width = id.w * .6 + "px";
     }
     new ResizeObserver(layout).observe(box); layout();
+    let last = 0;
     (function loop(t) {
-      const s = still ? 0 : t / 1000, now = performance.now();
-      els.forEach(o => {
-        const z = o.fd.z; let jy = 0;
+      const s = still ? 0 : t / 1000, now = performance.now(), dt = Math.min(.1, (t - last) / 1000); last = t;
+      const ke = still ? 1 : 1 - Math.exp(-dt * 6.5), b = onb.block; let F = 0;
+      els.forEach((o, i) => {
+        const z = o.fd.z, [x0, y0, x1, y1] = o.fd.box; let jy = 0;
         if (o.hop > 0) { const u = (now - o.hop) / 650; if (u >= 1) o.hop = -1; else jy = Math.sin(Math.PI * u) * 190; }
         o.hover += ((o.on ? 1 : 0) - o.hover) * .15;
-        const dx = lk.x * 50 * z, dy = -lk.y * 25 * z - jy + Math.sin(s * 1.6 + o.phase) * 4;
-        o.im.style.transform = `translate(${dx}px,${dy}px) rotateY(${lk.x * .22 * (1 - z * .4)}rad) rotateX(${lk.y * .08}rad) scale(${1 + o.hover * .04})`;
+        const ft = onb.frog === i ? 1 : 0, vt = onb.frog < 0 || ft ? 1 : 0;
+        o.f = o.f || 0; o.v = o.v ?? 1;
+        o.f += (ft - o.f) * ke; if (Math.abs(ft - o.f) < .0005) o.f = ft;
+        o.v += (vt - o.v) * ke; if (Math.abs(vt - o.v) < .0005) o.v = vt;
+        F = Math.max(F, o.f);
+        const e = o.f * o.f * (3 - 2 * o.f), p = 1 - e;
+        let tr = "";
+        if (e > 0 && b.w > 0) {
+          const k = Math.min(b.w / ((x1 - x0) * sc), b.h / ((y1 - y0) * sc));
+          tr = `translate(${((b.x + b.w / 2 - stx) / sc - (x0 + x1) / 2) * e}px,${((b.y + b.h - sty) / sc - y1) * e}px) `;
+          o.k = 1 + (k - 1) * e;
+        } else o.k = 1;
+        const dx = lk.x * 50 * z * p, dy = (-lk.y * 25 * z + Math.sin(s * 1.6 + o.phase) * 4) * p - jy;
+        o.im.style.transform = tr + `translate(${dx}px,${dy}px) rotateY(${lk.x * .22 * (1 - z * .4) * p}rad) rotateX(${lk.y * .08 * p}rad) scale(${o.k * (1 + o.hover * .04)})`;
+        o.im.style.opacity = o.v; o.im.style.pointerEvents = o.v < .5 ? "none" : "";
+        o.im.style.zIndex = ft ? 500 : Math.round((z + .2) * 100);
       });
+      glow.style.opacity = 1 - .85 * F;
       requestAnimationFrame(loop);
     })(0);
   }
@@ -554,14 +721,14 @@ buildGalaxies();
     mesh.position.y = h / 2;
     const pivot = new T.Group(); pivot.add(mesh);
     pivot.position.set(((fd.box[0] + fd.box[2]) / 2 - CX) * PX, -(fd.box[3] - CY) * PX, fd.z); group.add(pivot);
-    items.push({pivot, mesh, al, dw, dh, i, z: fd.z, hop: -1, hover: 0, phase: i * 1.7, by: pivot.position.y});
+    items.push({pivot, mesh, al, dw, dh, i, w, h, z: fd.z, hop: -1, hover: 0, phase: i * 1.7, bx: pivot.position.x, by: pivot.position.y, f: 0, v: 1});
   }
 
   let look = {x: 0, y: 0}, yaw = 0, pitch = 0, drag = false, lx = 0, ly = 0, moved = 0, t0 = 0, hoverIt = null;
   const ray = new T.Raycaster();
   function pick(e) {
     const r = cv.getBoundingClientRect(); ray.setFromCamera(new T.Vector2((e.clientX - r.left) / r.width * 2 - 1, -((e.clientY - r.top) / r.height * 2 - 1)), cam);
-    for (const h of ray.intersectObjects(items.map(it => it.mesh))) {
+    for (const h of ray.intersectObjects(items.filter(it => it.v > .5).map(it => it.mesh))) {
       const it = items.find(q => q.mesh === h.object);
       if (it.al[Math.min(it.dh - 1, Math.floor((1 - h.uv.y) * it.dh)) * it.dw + Math.min(it.dw - 1, Math.floor(h.uv.x * it.dw))] > .35) return it;
     }
@@ -583,28 +750,54 @@ buildGalaxies();
       rb.style.left = e.clientX + "px"; rb.style.top = e.clientY + "px"; $("frogs").appendChild(rb); setTimeout(() => rb.remove(), 900);
     }
   };
+  const geo = {ppu: 1, tn: 1, d: 8};
   function fit() {
     const w = box.clientWidth || 800, hh = box.clientHeight || 450; renderer.setSize(w, hh, false); cam.aspect = w / hh;
     const tn = Math.tan(cam.fov * Math.PI / 360), d = Math.max(4.0 / 2 / tn, 7 / 2 / (tn * cam.aspect));
     cam.position.set(0, .15, d); cam.lookAt(0, .15, 0); cam.updateProjectionMatrix();
-    const dk = document.querySelector(".dock-left"), over = dk && getComputedStyle(dk).position === "absolute";
-    const free = over ? w - 2 * (dk.offsetLeft - box.offsetLeft + dk.offsetWidth + 16) : w - 32;
-    group.scale.setScalar(Math.max(.3, Math.min(1, free / w * 2 * d * tn * cam.aspect / 5.6)));
+    onbMeasure(); const id = onb.idle.w > 0 ? onb.idle : {x: 0, y: 0, w, h: hh};
+    const ppu = hh / (2 * d * tn); Object.assign(geo, {ppu, tn, d});
+    const gs = Math.max(.3, Math.min(1, (id.w - 32) / w * 2 * d * tn * cam.aspect / 5.6, id.h / hh * 2 * d * tn / 4.4));
+    group.scale.setScalar(gs);
+    group.position.set((id.x + id.w / 2 - w / 2) / ppu, (hh / 2 - (id.y + id.h / 2)) / ppu, 0);
   }
   new ResizeObserver(fit).observe(box); fit();
+  let lastT = 0;
   function frame(t) {
-    const s = reduce ? 0 : t / 1000, now = performance.now();
+    const s = reduce ? 0 : t / 1000, now = performance.now(), dt = Math.min(.1, (t - lastT) / 1000); lastT = t;
+    const ke = reduce ? 1 : 1 - Math.exp(-dt * 6.5), b = onb.block, gs = group.scale.x;
+    let F = 0, top = null;
+    items.forEach(it => {
+      const ft = onb.frog === it.i ? 1 : 0, vt = onb.frog < 0 || ft ? 1 : 0;
+      it.f += (ft - it.f) * ke; if (Math.abs(ft - it.f) < .0005) it.f = ft;
+      it.v += (vt - it.v) * ke; if (Math.abs(vt - it.v) < .0005) it.v = vt;
+      if (it.f > F) { F = it.f; top = it; }
+    });
+    const damp = 1 - F;
     if (!drag) { yaw *= .94; pitch *= .94; }
-    group.rotation.y = yaw + look.x * .2 + Math.sin(s * .5) * .05; group.rotation.x = pitch - look.y * .1 + Math.cos(s * .4) * .025;
+    group.rotation.y = (yaw + look.x * .2 + Math.sin(s * .5) * .05) * damp; group.rotation.x = (pitch - look.y * .1 + Math.cos(s * .4) * .025) * damp;
     stars3.rotation.y = group.rotation.y * 1.6; stars3.rotation.x = group.rotation.x * 1.6;
+    // where a frog lands inside the "onb-block" placeholder (group-local units)
+    const W = box.clientWidth, H = box.clientHeight, e0 = geo.ppu * gs;
+    const tgt = it => ({x: ((b.x + b.w / 2 - W / 2) / geo.ppu - group.position.x) / gs, y: (.15 - (b.y + b.h - H / 2) / geo.ppu - group.position.y) / gs,
+      k: Math.min(b.w / (it.w * e0), b.h / (it.h * e0))});
     items.forEach(it => {
       let jy = 0, sq = 0;
       if (it.hop > 0) { const u = (now - it.hop) / 650; if (u >= 1) it.hop = -1; else { jy = Math.sin(Math.PI * u) * .75; sq = Math.sin(2 * Math.PI * u) * .07; } }
       it.hover += ((it === hoverIt ? 1 : 0) - it.hover) * .15;
-      it.pivot.position.y = it.by + jy + Math.sin(s * 1.6 + it.phase) * .015;
-      it.pivot.scale.set(1 + it.hover * .04 - sq * .5, 1 + it.hover * .04 + sq + Math.sin(s * 2 + it.phase) * .008, 1);
-      it.pivot.rotation.y = look.x * .22 * (1 - it.z * .4); it.pivot.rotation.x = -look.y * .08;
+      const e = it.f * it.f * (3 - 2 * it.f), p = 1 - e, T = e > 0 && b.w > 0 ? tgt(it) : null, base = T ? 1 + (T.k - 1) * e : 1;
+      it.pivot.position.set(T ? it.bx + (T.x - it.bx) * e : it.bx, (T ? it.by + (T.y - it.by) * e : it.by) + jy + Math.sin(s * 1.6 + it.phase) * .015 * p, it.z * p);
+      const sx = base * (1 + it.hover * .04 - sq * .5), sy = base * (1 + it.hover * .04 + sq + Math.sin(s * 2 + it.phase) * .008 * p);
+      it.pivot.scale.set(sx, sy, base);
+      it.pivot.rotation.y = look.x * .22 * (1 - it.z * .4) * p; it.pivot.rotation.x = -look.y * .08 * p;
+      const m = it.mesh.material; m.opacity = it.v; m.transparent = it.v < .999; it.pivot.visible = it.v > .01;
     });
+    // pink glow under the frog(s): follows the focused one
+    if (top && b.w > 0) {
+      const T = tgt(top), e = top.f * top.f * (3 - 2 * top.f);
+      glow.position.set(T.x * e, -1.62 + (T.y - 0.23 * T.k + 1.62) * e, -.3);
+      glow.scale.setScalar(1 + (top.w * T.k * 1.5 / 7.2 - 1) * e);
+    } else { glow.position.set(0, -1.62, -.3); glow.scale.setScalar(1); }
     renderer.render(scene, cam);
   }
   (function loop(t) { if (!document.hidden) frame(t); requestAnimationFrame(loop); })(0);
