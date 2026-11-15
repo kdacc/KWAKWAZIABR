@@ -607,7 +607,7 @@ addEventListener("keydown", e => { if (e.key === "Escape" && onb.q >= 0 && !$("t
 (function () {
   if (!window.THREE) return;
   const T = THREE, box = $("crew"); let renderer;
-  const FR = [{box:[369, 445, 942, 930],z:0.9,src:"kwakwaziabry/arina.png"},{box:[13, 602, 410, 932],z:0.6,src:"kwakwaziabry/diana.png"},{box:[821, 436, 1210, 797],z:0.45,src:"kwakwaziabry/oleksus.png"},{box:[30, 404, 451, 708],z:0.3,src:"kwakwaziabry/polina.png"},{box:[93, 243, 551, 553],z:0.1,src:"kwakwaziabry/sonya.png"},{box:[561, 227, 1013, 554],z:-0.1,src:"kwakwaziabry/andrii.png"}];
+  const FR = [{box:[472, 519, 840, 930],z:0.9,src:"kwakwaziabry/arina.png"},{box:[0, 483, 560, 932],z:0.6,src:"kwakwaziabry/diana.png"},{box:[706, 387, 1254, 797],z:0.45,src:"kwakwaziabry/oleksus.png"},{box:[26, 353, 454, 708],z:0.3,src:"kwakwaziabry/polina.png"},{box:[102, 290, 542, 553],z:0.1,src:"kwakwaziabry/sonya.png"},{box:[556, 211, 1018, 554],z:-0.1,src:"kwakwaziabry/andrii.png"}];
 
   function fallback() {
     box.hidden = false;
@@ -717,7 +717,7 @@ addEventListener("keydown", e => { if (e.key === "Escape" && onb.q >= 0 && !$("t
     const map = new T.Texture(im); map.needsUpdate = true; map.encoding = T.sRGBEncoding;
     const dm = new T.CanvasTexture(hc); dm.minFilter = dm.magFilter = T.LinearFilter;
     const mesh = new T.Mesh(new T.PlaneGeometry(w, h, 80, Math.max(24, Math.round(80 * h / w))),
-      new T.MeshLambertMaterial({map, displacementMap: dm, displacementScale: .34, alphaTest: .35}));
+      new T.MeshLambertMaterial({map, displacementMap: dm, displacementScale: .34, transparent: true, alphaTest: .03}));
     mesh.position.y = h / 2;
     const pivot = new T.Group(); pivot.add(mesh);
     pivot.position.set(((fd.box[0] + fd.box[2]) / 2 - CX) * PX, -(fd.box[3] - CY) * PX, fd.z); group.add(pivot);
@@ -790,7 +790,7 @@ addEventListener("keydown", e => { if (e.key === "Escape" && onb.q >= 0 && !$("t
       const sx = base * (1 + it.hover * .04 - sq * .5), sy = base * (1 + it.hover * .04 + sq + Math.sin(s * 2 + it.phase) * .008 * p);
       it.pivot.scale.set(sx, sy, base);
       it.pivot.rotation.y = look.x * .22 * (1 - it.z * .4) * p; it.pivot.rotation.x = -look.y * .08 * p;
-      const m = it.mesh.material; m.opacity = it.v; m.transparent = it.v < .999; it.pivot.visible = it.v > .01;
+      const m = it.mesh.material; m.opacity = it.v; it.pivot.visible = it.v > .01;
     });
     // pink glow under the frog(s): follows the focused one
     if (top && b.w > 0) {
