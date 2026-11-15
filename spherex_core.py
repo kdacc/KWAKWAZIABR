@@ -79,15 +79,15 @@ def _parse_coords(text: str) -> Optional[tuple[float, float]]:
 def resolve_target(text: str) -> Target:
     text = (text or "").strip()
     if not text:
-        raise ValueError("Вкажіть координати RA, Dec.")
+        raise ValueError("Please specify RA, Dec coordinates.")
     p = _parse_coords(text)
     if p is None:
         raise ValueError(
-            "Потрібні координати RA, Dec. Приклади: '133.795 -7.245' (градуси) "
-            "або '08h55m10.8s -07d14m42s'. Назви об'єктів не підтримуються.")
+            "Coordinates RA, Dec are required. Examples: '133.795 -7.245' (degrees) or '08h55m10.8s -07d14m42s'. Object names are not supported."
+            )
     ra, dec = p
     if not (0 <= ra < 360 and -90 <= dec <= 90):
-        raise ValueError("RA має бути в [0, 360), Dec в [-90, 90] градусах.")
+        raise ValueError("RA must be in [0, 360), Dec in [-90, 90] degrees.")
     return Target(ra, dec, label=f"{ra:.5f}, {dec:+.5f}")
 
 
@@ -102,7 +102,7 @@ def query_frames(ra: float, dec: float, detector: int) -> list[tuple[str, float]
 
     detector = int(detector)
     if detector not in DETECTOR_BANDS:
-        raise ValueError("Детектор має бути від 1 до 6.")
+        raise ValueError("Detector must be from 1 to 6.")
     query = f"""
     SELECT a.uri AS uri, p.time_bounds_lower AS t
     FROM spherex.artifact a
@@ -250,7 +250,7 @@ def align_frames(frames: list[Frame], grid_wcs, shape) -> tuple[np.ndarray, list
         out.append(arr)
         kept.append(f)
     if not out:
-        raise RuntimeError("Жоден кадр не покриває вибрану ділянку.")
+        raise RuntimeError("No frame covers the selected area.")
     return np.stack(out), kept
 
 
@@ -344,7 +344,7 @@ class Stack:
 
     def png(self, i: int, mode: str = "raw") -> bytes:
         if mode not in ("raw", "diff"):
-            raise ValueError("mode має бути raw або diff")
+            raise ValueError("mode must be 'raw' or 'diff'")
         if not 0 <= i < len(self):
             raise IndexError(i)
         key = (mode, i)
@@ -370,7 +370,7 @@ class Stack:
 def build_stack(frames: list[Frame], ra: float, dec: float, fov_deg: float,
                 meta: Optional[dict] = None) -> Stack:
     if not frames:
-        raise RuntimeError("Немає кадрів для обробки.")
+        raise RuntimeError("No frames available for processing.")
     scale = native_pixel_scale_arcsec(frames[0].wcs)
     grid, shape = make_grid(ra, dec, fov_deg, scale)
     aligned, kept = align_frames(frames, grid, shape)
@@ -461,10 +461,10 @@ def load_raw_frames(path: str) -> Optional[tuple[list[Frame], dict]]:
 def run_pipeline(target_text: str, fov_deg: float, detector: int,
                  progress: ProgressCb = _noop, use_cache: bool = True) -> Stack:
     if not 0.01 <= fov_deg <= 0.3:
-        raise ValueError("Поле зору має бути від 0.01° до 0.3°.")
+        raise ValueError("Field of view must be between 0.01° and 0.3°.")
     detector = int(detector)
     if detector not in DETECTOR_BANDS:
-        raise ValueError("Детектор має бути від 1 до 6.")
+        raise ValueError("Detector must be from 1 to 6.")
 
     aligned_path = os.path.join(CACHE_DIR, cache_key(target_text, fov_deg, detector) + ".npz")
     if use_cache:
@@ -498,12 +498,12 @@ def run_pipeline(target_text: str, fov_deg: float, detector: int,
         progress("query", 0, 1)
         rows = query_frames(ra_c, dec_c, detector)
         if not rows:
-            raise RuntimeError("Для цієї ділянки і цього детектора знімків не знайдено.")
+            raise RuntimeError("No frames found for the selected area and detector.")
         notes = []
         if len(rows) > MAX_FRAMES:
             step = math.ceil(len(rows) / MAX_FRAMES)
             rows = rows[::step]
-            notes.append(f"Знімків забагато, показано кожен {step}-й.")
+            notes.append(f"Too many frames, showing every {step}-th one.")
 
         years = [y for y in (mjd_to_jyear(t) for _, t in rows) if y is not None]
         epoch = float(np.median(years)) if years else 2026.0
@@ -516,10 +516,10 @@ def run_pipeline(target_text: str, fov_deg: float, detector: int,
         progress("download", 0, len(urls_times))
         frames = fetch_frames(urls_times, coord, progress)
         if not frames:
-            raise RuntimeError("Не вдалося завантажити жодного cutout-а.")
+            raise RuntimeError("Failed to download any cutouts.")
         failed = len(urls_times) - len(frames)
         if failed:
-            notes.append(f"Не завантажилося {failed} з {len(urls_times)} знімків.")
+            notes.append(f"Failed to download {failed} out of {len(urls_times)} frames.")
 
         raw_meta = {
             "target": tgt.label, "ra": round(ra_c, 6), "dec": round(dec_c, 6),
@@ -529,7 +529,7 @@ def run_pipeline(target_text: str, fov_deg: float, detector: int,
         try:
             save_raw_frames(raw_path, frames, raw_meta)
         except Exception as e: 
-            logging.warning("Кеш сирих кадрів не збережено: %s", e)
+            logging.warning("Failed to save raw frames cache: %s", e)
 
     progress("align", 0, 1)
     stack = build_stack(frames, ra_c, dec_c, fov_deg, meta={
@@ -541,6 +541,6 @@ def run_pipeline(target_text: str, fov_deg: float, detector: int,
     try:
         save_stack(aligned_path, stack)
     except Exception as e: 
-        logging.warning("Кеш не збережено: %s", e)
+        logging.warning("Failed to save aligned stack cache: %s", e)
     progress("done", 1, 1)
     return stack

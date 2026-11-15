@@ -6,16 +6,47 @@ import time
 import uuid
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse, Response
-from fastapi.staticfiles import StaticFiles
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
+from fastapi.staticfiles import StaticFiles
 
 import spherex_core as core
 import report
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 app = FastAPI(title="SPHEREx Time-Lapse")
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Return a single clear English message instead of raw Pydantic JSON."""
+    messages = []
+    for err in exc.errors():
+        loc = [str(x) for x in err.get("loc", []) if x != "body"]
+        field = ".".join(loc)
+        msg = err.get("msg", "Invalid value")
+        err_type = err.get("type", "")
+        if field == "target" and (
+            err_type == "string_too_short"
+            or "at least 1 character" in msg
+            or err_type == "missing"
+        ):
+            messages.append("Please enter RA, Dec coordinates.")
+        elif field == "target":
+            messages.append(msg)
+        elif field:
+            messages.append(f"{field}: {msg}")
+        else:
+            messages.append(msg)
+    seen = set()
+    unique = []
+    for m in messages:
+        if m not in seen:
+            seen.add(m)
+            unique.append(m)
+    detail = "; ".join(unique) if unique else "Invalid request"
+    return JSONResponse(status_code=422, content={"detail": detail})
 
 MAX_PARALLEL_JOBS = 2
 _slots = threading.Semaphore(MAX_PARALLEL_JOBS)
@@ -68,7 +99,32 @@ def _finish(job: dict, status: str, **extra) -> None:
             return
         job["status"] = status
         job.update(extra)
+        
+def _friendly_error(exc: Exception) -> str:
+    """Convert technical exceptions into clear user-facing messages."""
+    name = type(exc).__name__
+    text = str(exc).strip()
 
+    if name in ("DALServiceError", "HTTPError", "RemoteServiceError") or \
+       "irsa.ipac.caltech.edu" in text or "TAP" in text:
+        if any(code in text for code in ("502", "503", "504", "Proxy Error", "Gateway")):
+            return ("The IRSA archive server is temporarily overloaded or unavailable "
+                    "(error 502/503). Please try again in a few minutes.")
+        if "timeout" in text.lower() or "timed out" in text.lower():
+            return ("Timed out waiting for a response from the IRSA archive. "
+                    "Please try again later.")
+        return ("Could not reach the IRSA archive. "
+                "The server may be temporarily unavailable. Please try again later.")
+
+    if name in ("ValueError", "RuntimeError") and text:
+        return text
+
+    if name in ("ConnectionError", "TimeoutError", "OSError", "URLError"):
+        return ("Network problem while downloading data. "
+                "Check your internet connection or try again later.")
+
+    short = text[:180] + ("…" if len(text) > 180 else "")
+    return f"An error occurred during processing: {short}"
 
 def _run(job: dict) -> None:
     def progress(stage: str, done: int, total: int) -> None:
@@ -92,8 +148,10 @@ def _run(job: dict) -> None:
         _finish(job, "done", stack=stack)
     except core.Cancelled:
         _finish(job, "cancelled")
-    except Exception as e:
-        _finish(job, "error", error=f"{type(e).__name__}: {e}")
+    except Exception as e: 
+        import logging
+        logging.exception("Job %s failed", job["id"])
+        _finish(job, "error", error=_friendly_error(e))
     finally:
         _release_slot(job)
 
