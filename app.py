@@ -26,6 +26,7 @@ from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
 import spherex_core as core
+import report
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 app = FastAPI(title="SPHEREx Time-Lapse")
@@ -196,3 +197,36 @@ def detectors():
 @app.get("/")
 def index():
     return FileResponse(os.path.join(HERE, "index.html"))
+
+
+# --- звіт у PDF ------------------------------------------------------------
+class ReportRegion(BaseModel):
+    """Виділена область у частках розміру кадру (0..1), початок у верхньому лівому куті."""
+    x: float = Field(..., ge=0, le=1)
+    y: float = Field(..., ge=0, le=1)
+    w: float = Field(..., gt=0, le=1)
+    h: float = Field(..., gt=0, le=1)
+
+
+class ReportRequest(BaseModel):
+    frame_number: int = Field(..., ge=1, description="Номер кадру, рахуючи з 1")
+    notes: str = Field("", max_length=report.MAX_NOTES_CHARS)
+    region: Optional[ReportRegion] = None
+    area_image: Optional[str] = Field(None, max_length=report.MAX_AREA_IMAGE_B64_CHARS,
+                                      description="PNG кадру з червоним контуром, base64 / data URL")
+
+
+@app.post("/api/jobs/{job_id}/report")
+def job_report(job_id: str, req: ReportRequest):
+    job = JOBS.get(job_id)
+    if not job or job["status"] != "done":
+        raise HTTPException(404, "Кадри ще не готові")
+    try:
+        pdf = report.make_report_pdf(job["stack"].describe(), req.frame_number, req.notes,
+                                     req.region.model_dump() if req.region else None,
+                                     req.area_image)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    filename = f"SPHEREx_report_{job_id}_frame_{req.frame_number}.pdf"
+    return Response(pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
