@@ -23,6 +23,7 @@ from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 import spherex_core as core
@@ -197,6 +198,12 @@ def detectors():
 @app.get("/")
 def index():
     return FileResponse(os.path.join(HERE, "index.html"))
+
+
+# frog images for the Neon-lab 3D/CSS scene (index.html loads them as kwakwaziabry/<name>.png)
+_FROGS_DIR = os.path.join(HERE, "kwakwaziabry")
+if os.path.isdir(_FROGS_DIR):
+    app.mount("/kwakwaziabry", StaticFiles(directory=_FROGS_DIR), name="kwakwaziabry")
 
 
 # --- PDF report ------------------------------------------------------------
