@@ -8,7 +8,8 @@
 PlanetKwa is an interactive web application that allows users to explore SPHEREx observations of astronomical regions and compare images captured at different times and spectral channels.
 
 The application provides tools for visualizing observations, identifying potential changes, and documenting findings in downloadable PDF reports.
-
+[Link to web application
+](http://51.102.255.106/)
 ## Key Features
 
 ### 1. Astronomical Search
