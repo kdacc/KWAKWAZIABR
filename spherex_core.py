@@ -180,9 +180,9 @@ def load_cutout(url: str, coord, time_value: float, retries: int = 2) -> Optiona
             last_err = e
             time.sleep(1.5 * (attempt + 1))
         except (KeyError, IndexError, ValueError) as e:   
-            logging.warning("Пропущено %s: %s", url, e)
+            logging.warning("Skipped %s: %s", url, e)
             return None
-    logging.warning("Не вдалося завантажити %s: %s", url, last_err)
+    logging.warning("Failed to load %s: %s", url, last_err)
     return None
 
 
@@ -387,6 +387,12 @@ def raw_cache_key(target_text: str, detector: int) -> str:
     raw = f"{target_text.strip().lower()}|raw|{int(detector)}"
     return hashlib.sha1(raw.encode()).hexdigest()[:16]
 
+def _filter_cache_notes(notes: list[str]) -> list[str]:
+    return [
+        n for n in (notes or [])
+        if not str(n).startswith("Не завантажилося ")
+        and not str(n).startswith("Failed to load")
+    ]
 
 def save_raw_frames(path: str, frames: list[Frame], meta: dict) -> None:
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
@@ -470,6 +476,8 @@ def run_pipeline(target_text: str, fov_deg: float, detector: int,
     if use_cache:
         cached = load_stack(aligned_path)
         if cached is not None:
+            if isinstance(cached.meta, dict):
+                cached.meta["notes"] = _filter_cache_notes(list(cached.meta.get("notes") or []))
             progress("cache", 1, 1)
             return cached
 
@@ -483,7 +491,7 @@ def run_pipeline(target_text: str, fov_deg: float, detector: int,
         loaded = load_raw_frames(raw_path)
         if loaded is not None:
             frames, raw_meta = loaded
-            notes = list(raw_meta.get("notes", []))
+            notes = _filter_cache_notes(list(raw_meta.get("notes", [])))
             ra_c = raw_meta["ra"]
             dec_c = raw_meta["dec"]
             epoch = raw_meta["epoch"]
@@ -517,9 +525,6 @@ def run_pipeline(target_text: str, fov_deg: float, detector: int,
         frames = fetch_frames(urls_times, coord, progress)
         if not frames:
             raise RuntimeError("Failed to download any cutouts.")
-        failed = len(urls_times) - len(frames)
-        if failed:
-            notes.append(f"Failed to download {failed} out of {len(urls_times)} frames.")
 
         raw_meta = {
             "target": tgt.label, "ra": round(ra_c, 6), "dec": round(dec_c, 6),

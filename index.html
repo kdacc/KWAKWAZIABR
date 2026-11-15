@@ -674,7 +674,7 @@ addEventListener("keydown", e => { if (e.key === "Escape" && onb.q >= 0 && !$("t
       requestAnimationFrame(loop);
     })(0);
   }
-  try { renderer = new T.WebGLRenderer({antialias: true, alpha: true}); } catch (e) { console.warn("WebGL недоступний — малюю жаб у 2D/CSS-режимі:", e.message); fallback(); return; }
+  try { renderer = new T.WebGLRenderer({antialias: true, alpha: true}); } catch (e) { console.warn("WebGL is unavailable — drawing frogs in 2D/CSS mode:", e.message); fallback(); return; }
   renderer.outputEncoding = T.sRGBEncoding; renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   const cv = renderer.domElement; box.appendChild(cv); box.hidden = false;
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -704,7 +704,7 @@ addEventListener("keydown", e => { if (e.key === "Escape" && onb.q >= 0 && !$("t
     const w = (fd.box[2] - fd.box[0]) * PX, h = (fd.box[3] - fd.box[1]) * PX;
     const dw = 96, dh = Math.max(32, Math.round(96 * h / w)), c = document.createElement("canvas"); c.width = dw; c.height = dh;
     const g = c.getContext("2d"); g.drawImage(im, 0, 0, dw, dh);
-    let px; try { px = g.getImageData(0, 0, dw, dh).data; } catch (e) { px = new Uint8ClampedArray(dw * dh * 4).fill(255); console.warn("canvas tainted — відкрий через http://, не file://", e.message); }
+    let px; try { px = g.getImageData(0, 0, dw, dh).data; } catch (e) { px = new Uint8ClampedArray(dw * dh * 4).fill(255); console.warn("canvas tainted — open with http://, not file://", e.message); }
     const al = new Float32Array(dw * dh), lum = new Float32Array(dw * dh);
     for (let k = 0; k < dw * dh; k++) { al[k] = px[k * 4 + 3] / 255; lum[k] = (px[k * 4] * .3 + px[k * 4 + 1] * .59 + px[k * 4 + 2] * .11) / 255; }
     let b = al.slice();

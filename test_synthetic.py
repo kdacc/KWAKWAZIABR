@@ -99,7 +99,7 @@ def test_alignment_keeps_static_stars_fixed_and_moves_mover():
     sx, sy = grid.world_to_pixel(SkyCoord((RA0 + STARS[0][0]) * u.deg, (DEC0 + STARS[0][1]) * u.deg))
     pos = [centroid(stack.aligned[i], sx, sy) for i in range(len(stack))]
     spread = max(math.hypot(p[0] - sx, p[1] - sy) for p in pos)
-    assert spread < 0.5, f"нерухома зоря «пливе» на {spread:.2f} пікселя сітки"
+    assert spread < 0.5, f"the static star is moving on the grid: {spread:.2f}"
 
 
     mx = []
@@ -108,7 +108,7 @@ def test_alignment_keeps_static_stars_fixed_and_moves_mover():
                                             (DEC0 + MOVER_START[1]) * u.deg))
         mx.append(centroid(stack.aligned[k], x, y)[0])
     d = np.diff(mx)
-    assert np.all(d < 0), f"рух не монотонний: {d}"
+    assert np.all(d < 0), f"the movement is not monotonous: {d}"
     expected = MOVER_STEP / (N * SCALE * 0.7 / ny)
     assert np.mean(-d) == pytest.approx(expected, rel=0.15)
 
@@ -157,7 +157,7 @@ def test_names_are_rejected_without_any_network(monkeypatch):
     import socket
 
     def boom(*a, **k):
-        raise AssertionError("мережевий виклик у resolve_target")
+        raise AssertionError("network call in resolve_target")
     monkeypatch.setattr(socket.socket, "connect", boom)
     for name in ("Barnard's star", "eps Ind B", "RW Aur", "x"):
         with pytest.raises(ValueError):
@@ -212,7 +212,7 @@ def test_http_pipeline_with_mocked_archive(monkeypatch, tmp_path):
             if s["status"] in ("done", "error"):
                 return jid, s
             time.sleep(0.1)
-        raise AssertionError("завдання не завершилось")
+        raise AssertionError("the task did not complete in time")
 
     jid, s = run(2)
     assert s["status"] == "done", s
@@ -228,13 +228,13 @@ def test_http_pipeline_with_mocked_archive(monkeypatch, tmp_path):
     assert client.get(f"/api/jobs/{jid}/frame/99.png").status_code == 404
 
     _, s3 = run(3)
-    assert s3["status"] == "error" and "не знайдено" in s3["error"]
+    assert s3["status"] == "error" and "not found" in s3["error"]
 
     r1 = client.post("/api/jobs", json={"target": f"{RA0}, {DEC0}", "fov": 0.1, "detector": 2}).json()
     assert r1["job_id"] == jid
 
     r = client.post("/api/jobs", json={"target": "Barnard's star", "fov": 0.1, "detector": 2})
-    assert r.status_code == 422 and "координати" in r.json()["detail"].lower()
+    assert r.status_code == 422 and "coordinates" in r.json()["detail"].lower()
     assert len(client.get("/api/presets").json()) >= 5
     assert client.post("/api/jobs", json={"target": "x", "fov": 5, "detector": 2}).status_code == 422
     assert client.post("/api/jobs", json={"target": "x", "fov": 0.1, "detector": 9}).status_code == 422
@@ -283,7 +283,7 @@ def _wait(client, jid, wanted, timeout=8.0):
         if s["status"] in wanted:
             return s
         time.sleep(0.05)
-    raise AssertionError(f"{jid}: не дійшло до {wanted}, зараз {s['status']}/{s['stage']}")
+    raise AssertionError(f"{jid}: did not reach {wanted}, currently {s['status']}/{s['stage']}")
 
 
 def test_cancel_during_download_is_immediate_and_discards_result(cancel_env):
