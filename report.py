@@ -1,12 +1,12 @@
 """
-PDF-звіт по одному кадру SPHEREx (reportlab).
+PDF report for a single SPHEREx frame (reportlab).
 
-У звіті: знімок кадру з виділеною червоним областю, параметри спостереження
-(ціль, RA/Dec, детектор, поле зору, кількість кадрів), номер і дата кадру та нотатки користувача.
+The report contains: a frame snapshot with the selected area outlined in red, the observation parameters
+(target, RA/Dec, detector, field of view, number of frames), the frame number and date, and the user's notes.
 
-Дані параметрів беруться з результату конвеєра (`Stack.describe()`), а не від клієнта,
-тому їх у формі змінити не можна. Від клієнта приходять лише номер кадру, нотатки,
-область і PNG-знімок.
+The parameters are taken from the pipeline result (`Stack.describe()`), not from the client,
+so they cannot be changed in the form. The client only sends the frame number, notes,
+the area and the PNG snapshot.
 """
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import Image as PdfImage
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
-# Стандартні шрифти PDF (Helvetica) не мають кирилиці, тому беремо DejaVu з теки fonts/.
+# Standard PDF fonts (Helvetica) lack some glyphs used here (−, ′, ″, μ, ×), so DejaVu from the fonts/ folder is used.
 FONT_DIR = Path(__file__).resolve().parent / "fonts"
 FONT_REGULAR, FONT_BOLD = "ReportSans", "ReportSans-Bold"
 FONT_FILES = {FONT_REGULAR: "DejaVuSans.ttf", FONT_BOLD: "DejaVuSans-Bold.ttf"}
@@ -63,16 +63,16 @@ class ReportData:
     band_um: tuple[float, float]
     fov_deg: float
     frame_count: int
-    frame_number: int                      # з 1
+    frame_number: int                      # starts at 1
     frame_date: str
     wavelength_um: Optional[float]
     grid_px: Optional[tuple[int, int]]
-    region: Optional[dict]                 # частки кадру: x, y, w, h в [0, 1]
+    region: Optional[dict]                 # fractions of the frame: x, y, w, h in [0, 1]
     notes: str
 
 
 # ---------------------------------------------------------------------------
-# Форматування координат
+# Coordinate formatting
 # ---------------------------------------------------------------------------
 def format_ra_hms(ra_deg: float) -> str:
     hundredths = round(ra_deg / 15.0 * 3600 * 100) % (24 * 3600 * 100)
@@ -90,26 +90,26 @@ def format_dec_dms(dec_deg: float) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Вхідні дані
+# Input data
 # ---------------------------------------------------------------------------
 def decode_area_image(encoded: str) -> AreaImage:
-    """PNG у base64 (або data URL) -> перевірене зображення. ValueError, якщо воно не підходить."""
+    """PNG in base64 (or a data URL) -> a validated image. ValueError if it is not suitable."""
     payload = encoded.split(",", 1)[1] if encoded.startswith("data:") else encoded
     try:
         raw = base64.b64decode(payload, validate=True)
     except (binascii.Error, ValueError):
-        raise ValueError("Зображення області пошкоджено (base64).") from None
+        raise ValueError("The area image is corrupted (base64).") from None
     try:
         with Image.open(io.BytesIO(raw)) as image:
             image.verify()
         with Image.open(io.BytesIO(raw)) as image:
             image_format, (width, height) = image.format, image.size
     except (OSError, SyntaxError, ValueError, Image.DecompressionBombError):
-        raise ValueError("Зображення області не є коректним PNG.") from None
+        raise ValueError("The area image is not a valid PNG.") from None
     if image_format != "PNG":
-        raise ValueError("Зображення області має бути у форматі PNG.")
+        raise ValueError("The area image must be a PNG.")
     if max(width, height) > MAX_AREA_IMAGE_SIDE_PX:
-        raise ValueError(f"Зображення області завелике (понад {MAX_AREA_IMAGE_SIDE_PX} пікселів).")
+        raise ValueError(f"The area image is too large (over {MAX_AREA_IMAGE_SIDE_PX} pixels).")
     return AreaImage(raw, width, height)
 
 
@@ -121,10 +121,10 @@ def _region_in_pixels(region: dict, grid_px: tuple[int, int]) -> tuple[int, int,
 
 def collect_report_data(description: dict, frame_number: int, notes: str,
                         region: Optional[dict]) -> ReportData:
-    """Збирає дані звіту з `Stack.describe()`; ValueError при неправильному номері кадру."""
+    """Collects the report data from `Stack.describe()`; ValueError for an invalid frame number."""
     frames = description["frames"]
     if not 1 <= frame_number <= len(frames):
-        raise ValueError(f"Номер кадру має бути від 1 до {len(frames)}.")
+        raise ValueError(f"The frame number must be between 1 and {len(frames)}.")
     meta, frame = description["meta"], frames[frame_number - 1]
     grid = meta.get("grid_px")
     return ReportData(
@@ -142,7 +142,7 @@ def collect_report_data(description: dict, frame_number: int, notes: str,
 
 
 # ---------------------------------------------------------------------------
-# Побудова PDF
+# Building the PDF
 # ---------------------------------------------------------------------------
 def _register_fonts() -> None:
     if FONT_REGULAR in pdfmetrics.getRegisteredFontNames():
@@ -150,7 +150,7 @@ def _register_fonts() -> None:
     for font_name, file_name in FONT_FILES.items():
         path = FONT_DIR / file_name
         if not path.is_file():
-            raise RuntimeError(f"Немає шрифта {path}: він потрібен для кирилиці у PDF.")
+            raise RuntimeError(f"Font file {path} is missing: it is needed for special glyphs in the PDF.")
         pdfmetrics.registerFont(TTFont(font_name, str(path)))
     pdfmetrics.registerFontFamily(FONT_REGULAR, normal=FONT_REGULAR, bold=FONT_BOLD,
                                   italic=FONT_REGULAR, boldItalic=FONT_BOLD)
@@ -173,40 +173,40 @@ def _text(value: str) -> str:
 
 def _parameter_rows(data: ReportData) -> list[tuple[str, str]]:
     rows = [
-        ("Ціль", data.target),
+        ("Target", data.target),
         ("RA", f"{data.ra_deg:.6f}° ({format_ra_hms(data.ra_deg)})"),
         ("Dec", f"{data.dec_deg:+.6f}° ({format_dec_dms(data.dec_deg)})"),
     ]
     if data.epoch is not None:
-        rows.append(("Епоха координат", f"J{data.epoch}"))
+        rows.append(("Coordinate epoch", f"J{data.epoch}"))
     rows += [
-        ("Детектор", f"D{data.detector} ({data.band_um[0]}–{data.band_um[1]} мкм)"),
-        ("Поле зору (FOV)", f"{data.fov_deg}°"),
-        ("Кількість кадрів", str(data.frame_count)),
-        ("Номер кадру", f"{data.frame_number} з {data.frame_count}"),
-        ("Дата кадру (UTC)", data.frame_date),
+        ("Detector", f"D{data.detector} ({data.band_um[0]}–{data.band_um[1]} μm)"),
+        ("Field of view (FOV)", f"{data.fov_deg}°"),
+        ("Number of frames", str(data.frame_count)),
+        ("Frame number", f"{data.frame_number} of {data.frame_count}"),
+        ("Frame date (UTC)", data.frame_date),
     ]
     if data.wavelength_um is not None:
-        rows.append(("Довжина хвилі кадру", f"{data.wavelength_um:.4f} мкм"))
+        rows.append(("Frame wavelength", f"{data.wavelength_um:.4f} μm"))
     if data.region and data.grid_px:
         x, y, w, h = _region_in_pixels(data.region, data.grid_px)
-        rows.append(("Виділена область",
-                     f"x={x}, y={y}, ширина={w}, висота={h} пікс. (кадр {data.grid_px[0]}×{data.grid_px[1]}; "
-                     "початок координат у верхньому лівому куті)"))
-    rows.append(("Нотатки", data.notes or "—"))
+        rows.append(("Selected area",
+                     f"x={x}, y={y}, width={w}, height={h} px (frame {data.grid_px[0]}×{data.grid_px[1]}; "
+                     "origin at the top-left corner)"))
+    rows.append(("Notes", data.notes or "—"))
     return rows
 
 
 def _image_block(area: Optional[AreaImage], styles: dict[str, ParagraphStyle], frame_number: int) -> list:
     if area is None:
-        return [Paragraph("Знімок із виділеною областю не додано.", styles["muted"])]
+        return [Paragraph("No snapshot with a selected area was attached.", styles["muted"])]
     scale = min(MAX_IMAGE_SIDE / area.width, MAX_IMAGE_SIDE / area.height)
     picture = PdfImage(io.BytesIO(area.png), width=area.width * scale, height=area.height * scale)
     framed = Table([[picture]], style=TableStyle([
         ("BOX", (0, 0), (-1, -1), 0.5, LIGHT_GREY),
         ("ALIGN", (0, 0), (-1, -1), "CENTER"),
     ]))
-    caption = Paragraph(f"Кадр {frame_number}; виділена область обведена червоним контуром.", styles["caption"])
+    caption = Paragraph(f"Frame {frame_number}; the selected area is outlined in red.", styles["caption"])
     return [framed, Spacer(1, 3 * mm), caption]
 
 
@@ -230,8 +230,8 @@ def build_report_pdf(data: ReportData, area: Optional[AreaImage]) -> bytes:
     )
     generated = time.strftime("%Y-%m-%d %H:%M:%S")
     story = [
-        Paragraph("SPHEREx Time-Lapse — звіт", styles["title"]),
-        Paragraph(f"Створено: {generated}", styles["muted"]),
+        Paragraph("SPHEREx Time-Lapse — report", styles["title"]),
+        Paragraph(f"Created: {generated}", styles["muted"]),
         Spacer(1, 6 * mm),
         *_image_block(area, styles, data.frame_number),
         Spacer(1, 6 * mm),
@@ -240,7 +240,7 @@ def build_report_pdf(data: ReportData, area: Optional[AreaImage]) -> bytes:
     buffer = io.BytesIO()
     SimpleDocTemplate(buffer, pagesize=A4, leftMargin=PAGE_MARGIN, rightMargin=PAGE_MARGIN,
                       topMargin=PAGE_MARGIN, bottomMargin=PAGE_MARGIN,
-                      title=f"SPHEREx — звіт, кадр {data.frame_number}",
+                      title=f"SPHEREx — report, frame {data.frame_number}",
                       author="SPHEREx Time-Lapse").build(story)
     return buffer.getvalue()
 
@@ -248,9 +248,9 @@ def build_report_pdf(data: ReportData, area: Optional[AreaImage]) -> bytes:
 def make_report_pdf(description: dict, frame_number: int, notes: str = "",
                     region: Optional[dict] = None, area_image: Optional[str] = None) -> bytes:
     """
-    description -- результат `Stack.describe()`; frame_number -- з 1;
-    region -- {x, y, w, h} у частках кадру; area_image -- PNG у base64 / data URL.
-    ValueError -- некоректні дані від клієнта.
+    description -- the result of `Stack.describe()`; frame_number -- starts at 1;
+    region -- {x, y, w, h} as fractions of the frame; area_image -- PNG in base64 / data URL.
+    ValueError -- invalid data from the client.
     """
     data = collect_report_data(description, frame_number, notes, region)
     area = decode_area_image(area_image) if area_image else None

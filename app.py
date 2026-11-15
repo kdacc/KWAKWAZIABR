@@ -1,17 +1,17 @@
 """
-Веб-бекенд SPHEREx Time-Lapse (FastAPI).
+SPHEREx Time-Lapse web backend (FastAPI).
 
-Запуск:  uvicorn app:app --reload
-Відкрити: http://127.0.0.1:8000/
+Run:   uvicorn app:app --reload
+Open:  http://127.0.0.1:8000/
 
 API:
-  GET  /api/presets                   приклади (координати зашито в коді, без довідників)
+  GET  /api/presets                   examples (coordinates are hard-coded, no catalog lookups)
   POST /api/jobs                      {target: "RA, Dec", fov, detector} -> {job_id}
-  GET  /api/jobs/{id}                 стан, прогрес, список кадрів (коли готово)
+  GET  /api/jobs/{id}                 state, progress, frame list (when done)
                                       status: queued | running | done | error | cancelled
-  POST /api/jobs/{id}/cancel          скасувати (ідемпотентно) -> {ok, status}
+  POST /api/jobs/{id}/cancel          cancel (idempotent) -> {ok, status}
   GET  /api/jobs/{id}/frame/{i}.png   ?mode=raw
-  GET  /api/detectors                 довідка про 6 детекторів
+  GET  /api/detectors                 info about the 6 detectors
 """
 from __future__ import annotations
 
@@ -38,8 +38,8 @@ JOBS: dict[str, dict] = {}
 JOB_BY_KEY: dict[str, str] = {}
 KEEP_JOBS = 30
 
-# Захардкоджені приклади. Координати ICRS у градусах; жодних запитів до довідників (SIMBAD тощо).
-# Для швидких об'єктів позицію перенесено вручну на епоху ~2026.0, бо власний рух не враховується.
+# Hard-coded examples. ICRS coordinates in degrees; no catalog lookups (SIMBAD etc.).
+# For fast-moving objects the position was moved by hand to epoch ~2026.0, because proper motion is not applied.
 PRESETS = [
     {"name": "WISE 0855", "ra": 133.79513, "dec": -7.24515, "fov": 0.1},
     {"name": "Barnard's Star", "ra": 269.44626, "dec": 4.76823, "fov": 0.1},
@@ -51,8 +51,8 @@ PRESETS = [
 
 class JobRequest(BaseModel):
     target: str = Field(..., min_length=1, max_length=120,
-                        description="Координати 'RA, Dec' у градусах або сексагесимально")
-    fov: float = Field(0.1, ge=0.01, le=0.3, description="Поле зору, градуси")
+                        description="Coordinates 'RA, Dec' in degrees or sexagesimal")
+    fov: float = Field(0.1, ge=0.01, le=0.3, description="Field of view, degrees")
     detector: int = Field(..., ge=1, le=6)
 
 
@@ -60,19 +60,19 @@ FINISHED = ("done", "error", "cancelled")
 
 
 def _purge() -> None:
-    """Викликається під _lock. Видаляє найстаріші завершені завдання."""
+    """Called under _lock. Removes the oldest finished jobs."""
     if len(JOBS) <= KEEP_JOBS:
         return
     finished = sorted((j for j in JOBS.values() if j["status"] in FINISHED),
                       key=lambda j: j["created"])
     for j in finished[: len(JOBS) - KEEP_JOBS]:
         JOBS.pop(j["id"], None)
-        if JOB_BY_KEY.get(j["key"]) == j["id"]:      # не зачепити новіше завдання з тим самим ключем
+        if JOB_BY_KEY.get(j["key"]) == j["id"]:      # do not touch a newer job with the same key
             JOB_BY_KEY.pop(j["key"], None)
 
 
 def _release_slot(job: dict) -> None:
-    """Звільняє слот паралельності рівно один раз (з потоку або з cancel_job)."""
+    """Releases the concurrency slot exactly once (from the worker thread or from cancel_job)."""
     with _lock:
         if job["has_slot"]:
             job["has_slot"] = False
@@ -80,7 +80,7 @@ def _release_slot(job: dict) -> None:
 
 
 def _finish(job: dict, status: str, **extra) -> None:
-    """Фінальний перехід стану. Скасоване завдання вже не змінюється."""
+    """Final state transition. A cancelled job no longer changes."""
     with _lock:
         if job["status"] == "cancelled":
             return
@@ -94,7 +94,7 @@ def _run(job: dict) -> None:
             raise core.Cancelled()
         job["stage"], job["done"], job["total"] = stage, done, total
 
-    # Чекаємо слот, але не після скасування (скасована черга не займає слотів).
+    # Wait for a slot, but not after cancellation (a cancelled queue entry holds no slots).
     while not _slots.acquire(timeout=0.2):
         if job["cancel"]:
             return
@@ -118,7 +118,7 @@ def _run(job: dict) -> None:
 
 @app.post("/api/jobs")
 def create_job(req: JobRequest):
-    # Лише координати, без мережі. Назва об'єкта -> 422 одразу, а не збій у фоновому потоці.
+    # Coordinates only, no network. An object name -> 422 right away, not a failure in the background thread.
     try:
         norm = core.normalize_target(req.target)
     except ValueError as e:
@@ -142,11 +142,11 @@ def create_job(req: JobRequest):
 
 @app.post("/api/jobs/{job_id}/cancel")
 def cancel_job(job_id: str):
-    """Скасовує завдання. Слот звільняється одразу, фоновий потік зупиниться на
-    найближчому кроці конвеєра. Для вже завершеного завдання нічого не робить."""
+    """Cancels a job. The slot is released immediately; the background thread stops at
+    the nearest pipeline step. Does nothing for an already finished job."""
     job = JOBS.get(job_id)
     if not job:
-        raise HTTPException(404, "Невідоме завдання")
+        raise HTTPException(404, "Unknown job")
     with _lock:
         if job["status"] in FINISHED:
             return {"ok": True, "status": job["status"]}
@@ -161,7 +161,7 @@ def cancel_job(job_id: str):
 def job_status(job_id: str):
     job = JOBS.get(job_id)
     if not job:
-        raise HTTPException(404, "Невідоме завдання")
+        raise HTTPException(404, "Unknown job")
     out = {"id": job_id, "status": job["status"], "stage": job["stage"],
            "done": job["done"], "total": job["total"], "error": job["error"]}
     if job["status"] == "done":
@@ -173,11 +173,11 @@ def job_status(job_id: str):
 def job_frame(job_id: str, index: int):
     job = JOBS.get(job_id)
     if not job or job["status"] != "done":
-        raise HTTPException(404, "Кадри ще не готові")
+        raise HTTPException(404, "Frames are not ready yet")
     try:
         png = job["stack"].png(index, "raw")
     except IndexError:
-        raise HTTPException(404, "Немає такого кадру")
+        raise HTTPException(404, "No such frame")
     except ValueError as e:
         raise HTTPException(422, str(e))
     return Response(png, media_type="image/png",
@@ -199,9 +199,9 @@ def index():
     return FileResponse(os.path.join(HERE, "index.html"))
 
 
-# --- звіт у PDF ------------------------------------------------------------
+# --- PDF report ------------------------------------------------------------
 class ReportRegion(BaseModel):
-    """Виділена область у частках розміру кадру (0..1), початок у верхньому лівому куті."""
+    """Selected area as fractions of the frame size (0..1), origin at the top-left corner."""
     x: float = Field(..., ge=0, le=1)
     y: float = Field(..., ge=0, le=1)
     w: float = Field(..., gt=0, le=1)
@@ -209,18 +209,18 @@ class ReportRegion(BaseModel):
 
 
 class ReportRequest(BaseModel):
-    frame_number: int = Field(..., ge=1, description="Номер кадру, рахуючи з 1")
+    frame_number: int = Field(..., ge=1, description="Frame number, starting at 1")
     notes: str = Field("", max_length=report.MAX_NOTES_CHARS)
     region: Optional[ReportRegion] = None
     area_image: Optional[str] = Field(None, max_length=report.MAX_AREA_IMAGE_B64_CHARS,
-                                      description="PNG кадру з червоним контуром, base64 / data URL")
+                                      description="Frame PNG with a red outline, base64 / data URL")
 
 
 @app.post("/api/jobs/{job_id}/report")
 def job_report(job_id: str, req: ReportRequest):
     job = JOBS.get(job_id)
     if not job or job["status"] != "done":
-        raise HTTPException(404, "Кадри ще не готові")
+        raise HTTPException(404, "Frames are not ready yet")
     try:
         pdf = report.make_report_pdf(job["stack"].describe(), req.frame_number, req.notes,
                                      req.region.model_dump() if req.region else None,
